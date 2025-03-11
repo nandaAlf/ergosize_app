@@ -42,15 +42,23 @@ class Study(models.Model):
         return self.name
     
 class Measurement(models.Model):
+    # POSITION_CHOICES = [
+    #     (True, 'Parado'),
+    #     (False, 'Erecto'),
+    # ]
     POSITION_CHOICES = [
-        (True, 'Parado'),
-        (False, 'Erecto'),
+        ('P', 'Parado'),
+        # ('Erecto', 'Erecto'),
+        ('S', 'Sentado'),
+        # ('Acostado', 'Acostado'),
     ]
+    
     study = models.ForeignKey(Study, on_delete=models.CASCADE)  # Relación con el estudio
     person = models.ForeignKey(Person, on_delete=models.CASCADE)
     measurement_type = models.ForeignKey(MeasurementType, on_delete=models.CASCADE)
     measure = models.FloatField()
-    position = models.BooleanField(choices=POSITION_CHOICES)
+    # position = models.BooleanField(choices=POSITION_CHOICES)
+    position = models.CharField(max_length=2, choices=POSITION_CHOICES)  # Ahora más flexible
     date = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -65,7 +73,10 @@ class Measurement(models.Model):
 #         return self.name
 
 class AnthropometricTable(models.Model):
-    study = models.OneToOneField(Study, on_delete=models.CASCADE, unique=True)
+    # study = models.OneToOneField(Study, on_delete=models.CASCADE, )
+    study = models.ForeignKey(Study, on_delete=models.CASCADE)
+    name = models.CharField(max_length=100, blank=True, null=True)  # Nombre opcional para la tabla
+    description = models.TextField(blank=True, null=True)  # Descripción opcional
     measurement_types = models.ManyToManyField(MeasurementType, through='AnthropometricStatistic')
 
     def __str__(self):
