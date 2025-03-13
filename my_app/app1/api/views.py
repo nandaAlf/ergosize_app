@@ -1,15 +1,19 @@
+from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.response import Response
-from app1.models import AnthropometricStatistic, AnthropometricTable, Person, Measurement, Study, MeasurementType
-from app1.api.serializer import AnthropometricStatisticSerializer, AnthropometricTableSerializer, PersonSerializer, MeasurementSerializer, StudySerializer, MeasurementTypeSerializer
+from app1.models import AnthropometricStatistic, AnthropometricTable, Person, Measurement, Study, Dimension, StudyDimension
+from app1.api.serializer import AnthropometricStatisticSerializer, AnthropometricTableSerializer, PersonSerializer, MeasurementSerializer, StudyDimensionSerializer, StudySerializer, DimensionSerializer
+from django.http import JsonResponse
+from django.views import View
+from django.db import connection
 
 class PersonViewSet(viewsets.ModelViewSet):
     queryset = Person.objects.all()
     serializer_class = PersonSerializer
 
-class MeasurementTypeViewSet(viewsets.ModelViewSet):
-    queryset = MeasurementType.objects.all()
-    serializer_class = MeasurementTypeSerializer
+class DimensionViewSet(viewsets.ModelViewSet):
+    queryset = Dimension.objects.all()
+    serializer_class = DimensionSerializer
 
 class MeasurementViewSet(viewsets.ModelViewSet):
     queryset = Measurement.objects.all()
@@ -18,6 +22,11 @@ class MeasurementViewSet(viewsets.ModelViewSet):
 class StudyViewSet(viewsets.ModelViewSet):
     queryset = Study.objects.all()
     serializer_class = StudySerializer
+
+class StudyDimensionViewSet(viewsets.ModelViewSet):
+    queryset = StudyDimension.objects.all()
+    serializer_class = StudyDimensionSerializer
+
 
 class AnthropometricTableViewSet(viewsets.ModelViewSet):
     queryset = AnthropometricTable.objects.all()
@@ -32,7 +41,7 @@ class AnthropometricTableViewSet(viewsets.ModelViewSet):
             table = AnthropometricTable.objects.create(study=study)
 
             for stat in statistics_data:
-                measurement_type = MeasurementType.objects.get(id=stat["measurement_type"])
+                measurement_type = Dimension.objects.get(id=stat["measurement_type"])
                 AnthropometricStatistic.objects.create(
                     table=table,
                     measurement_type=measurement_type,
@@ -50,10 +59,108 @@ class AnthropometricTableViewSet(viewsets.ModelViewSet):
             return Response({"message": "Tabla creada correctamente"}, status=status.HTTP_201_CREATED)
         except Study.DoesNotExist:
             return Response({"error": "El estudio no existe"}, status=status.HTTP_400_BAD_REQUEST)
-        except MeasurementType.DoesNotExist:
+        except Dimension.DoesNotExist:
             return Response({"error": "El tipo de medición no existe"}, status=status.HTTP_400_BAD_REQUEST)
 
 class AnthropometricStatisticViewSet(viewsets.ModelViewSet):
     queryset = AnthropometricStatistic.objects.all()
     serializer_class = AnthropometricStatisticSerializer
 
+
+from django.http import JsonResponse
+from django.views import View
+from django.db import connection
+from django.shortcuts import get_object_or_404
+
+class StudyDataView(View):
+    """
+    Vista para obtener los datos de un estudio específico, incluyendo las personas
+    y sus mediciones en las dimensiones asociadas.
+    """
+
+    def get(self, request, study_id):
+        """
+        Maneja las solicitudes GET para obtener los datos del estudio.
+        
+        Args:
+            request: La solicitud HTTP.
+            study_id: El ID del estudio.
+        
+        Returns:
+            JsonResponse: Un JSON con los datos del estudio.
+        """
+        # Verificar que el estudio existe
+        study = get_object_or_404(Study, id=study_id)
+
+        # Obtener los datos del estudio
+        try:
+            data = self.get_study_data_json(study_id)
+            return JsonResponse(data, safe=False, status=200)
+        except Exception as e:
+            # Manejar errores en la consulta o procesamiento
+            return JsonResponse({"error": str(e)}, status=500)
+
+    def get_study_data(self, study_id):
+        """
+        Obtiene los datos del estudio desde la base de datos.
+        
+        Args:
+            study_id: El ID del estudio.
+        
+        Returns:
+            list: Una lista de tuplas con los datos de las personas y sus mediciones.
+        """
+        query = """
+        SELECT
+            p.id AS person_id,
+            p.name AS person_name,
+            d.name AS dimension_name,
+            m.value AS measurement_value
+        FROM
+            app1_person p
+        JOIN
+            app1_measurement m ON p.id = m.person_id
+        JOIN
+            app1_dimension d ON m.dimension_id = d.id
+        JOIN
+            app1_studyDimension sd ON d.id = sd.id_dimension_id
+        WHERE
+            m.study_id = %s
+        ORDER BY
+            p.id, d.name;
+        """
+        
+        with connection.cursor() as cursor:
+            cursor.execute(query, [study_id])
+            results = cursor.fetchall()
+        
+        return results
+
+    def get_study_data_json(self, study_id):
+        """
+        Convierte los datos del estudio en un formato JSON.
+        
+        Args:
+            study_id: El ID del estudio.
+        
+        Returns:
+            list: Una lista de diccionarios con los datos de las personas y sus mediciones.
+        """
+        results = self.get_study_data(study_id)
+        
+        # Crear un diccionario para agrupar los datos por persona
+        data = {}
+        for row in results:
+            person_id, person_name, dimension_name, measurement_value = row
+            
+            if person_id not in data:
+                data[person_id] = {
+                    "id": person_id,
+                    "name": person_name,
+                    "dimensions": {}
+                }
+            
+            data[person_id]["dimensions"][dimension_name] = measurement_value
+        
+        # Convertir el diccionario a una lista
+        return list(data.values())
