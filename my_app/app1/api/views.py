@@ -18,6 +18,35 @@ class DimensionViewSet(viewsets.ModelViewSet):
 class MeasurementViewSet(viewsets.ModelViewSet):
     queryset = Measurement.objects.all()
     serializer_class = MeasurementSerializer
+    # permission_classes = [IsAuthenticated]  # Solo usuarios autenticados pueden eliminar
+
+    def destroy(self, request, *args, **kwargs):
+        # Obtener el study_id y person_id de la solicitud
+        study_id=self.kwargs.get('pk')
+        person_id = request.data.get('person_id')
+
+        if not study_id or not person_id:
+            return Response(
+                {"error": "Se requieren study_id y person_id"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # # Verificar permisos adicionales si es necesario
+        # if not request.user.has_perm('app.delete_measurement'):
+        #     return Response(
+        #         {"error": "No tienes permisos para eliminar estas mediciones"},
+        #         status=status.HTTP_403_FORBIDDEN,
+        #     )
+
+        # Eliminar todos los registros de Measurement que coincidan
+        Measurement.objects.filter(study_id=study_id, person_id=person_id).delete()
+
+        # Puedes usar señales (signals) de Django para ejecutar acciones adicionales antes o después de la eliminación.
+
+        return Response(
+            {"message": "Mediciones eliminadas correctamente"},
+            status=status.HTTP_204_NO_CONTENT,
+        )
 
 class StudyViewSet(viewsets.ModelViewSet):
     queryset = Study.objects.all()
@@ -100,6 +129,20 @@ class StudyDataView(View):
             # Manejar errores en la consulta o procesamiento
             return JsonResponse({"error": str(e)}, status=500)
 
+    
+    def get_study_dimensions(self, study_id):
+        """
+        Obtiene todas las dimensiones asociadas al estudio desde la tabla StudyDimension.
+        
+        Args:
+            study_id: El ID del estudio.
+        
+        Returns:
+            list: Una lista de nombres de dimensiones.
+        """
+        dimensions = StudyDimension.objects.filter(id_study_id=study_id).values_list('id_dimension__name', flat=True)
+        return list(dimensions)
+    
     def get_study_data(self, study_id):
         """
         Obtiene los datos del estudio desde la base de datos.
@@ -144,8 +187,13 @@ class StudyDataView(View):
             study_id: El ID del estudio.
         
         Returns:
-            list: Una lista de diccionarios con los datos de las personas y sus mediciones.
+            dict: Un diccionario con los datos del estudio, incluyendo las dimensiones y las personas.
         """
+        
+         # Obtener todas las dimensiones asociadas al estudio
+        dimensions = self.get_study_dimensions(study_id)
+       
+        # Obtener los datos de las personas y sus mediciones
         results = self.get_study_data(study_id)
         
         # Crear un diccionario para agrupar los datos por persona
@@ -157,10 +205,15 @@ class StudyDataView(View):
                 data[person_id] = {
                     "id": person_id,
                     "name": person_name,
-                    "dimensions": {}
+                    # "dimensions": {}
+                    "dimensions": {dimension: None for dimension in dimensions}  # Inicializar todas las dimensiones
                 }
             
             data[person_id]["dimensions"][dimension_name] = measurement_value
         
         # Convertir el diccionario a una lista
-        return list(data.values())
+        # return list(data.values())
+        return {
+            "dimensions": dimensions,  # Lista de todas las dimensiones
+            "persons": list(data.values())  # Lista de personas con sus mediciones
+        }

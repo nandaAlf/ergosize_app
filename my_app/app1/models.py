@@ -62,10 +62,6 @@ class StudyDimension(models.Model):
     def __str__(self):
         return f"{self.id_study} - {self.id_dimension}"
 class Measurement(models.Model):
-    # POSITION_CHOICES = [
-    #     (True, 'Parado'),
-    #     (False, 'Erecto'),
-    # ]
     POSITION_CHOICES = [
         ('P', 'Parado'),
         # ('Erecto', 'Erecto'),
