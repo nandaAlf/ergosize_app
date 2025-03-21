@@ -27,7 +27,7 @@ class Person(models.Model):
 
 class Dimension(models.Model):
     name = models.CharField(max_length=100, unique=True)
-    initial=models.CharField(max_length=3)
+    initial=models.CharField(max_length=6)
     # unit = models.CharField(max_length=50)
 
     def __str__(self):
@@ -70,7 +70,7 @@ class Measurement(models.Model):
     ]
     
     study = models.ForeignKey(Study, on_delete=models.CASCADE)  # Relación con el estudio
-    person = models.ForeignKey(Person, on_delete=models.CASCADE)
+    person = models.ForeignKey(Person, on_delete=models.CASCADE, related_name='measurements')
     dimension = models.ForeignKey(Dimension, on_delete=models.CASCADE)
     # measure = models.FloatField()
     value = models.FloatField()
