@@ -26,7 +26,8 @@ class Person(models.Model):
 
 
 class Dimension(models.Model):
-    name = models.CharField(max_length=100, unique=True)
+    # id_dimension = models.AutoField(primary_key=True)  # Reemplaza el id automático
+    name = models.CharField(max_length=100, unique=True,)
     initial=models.CharField(max_length=6)
     # unit = models.CharField(max_length=50)
 
@@ -35,10 +36,27 @@ class Dimension(models.Model):
 
 
 class Study(models.Model):
+    CLASSFICATION_CHOICES = [
+        ('L', 'Lactante'),
+        ('T', 'Transicional'),
+        ('A', 'Adolescente'),
+        ('E', 'Escolares'),
+        ('AD', 'Adulto'),
+        ('ADM', 'Adulto Mayor'),
+    ]
+    GENDER_CHOICES = [
+        ('M', 'Masculino'),
+        ('F', 'Femenino'),
+        ('MF', 'Mixto'),
+    ]
+    
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True, null=True)
-    # age_range = models.CharField(max_length=50)
-    # size = models.IntegerField()
+    age_min=models.IntegerField(null=True)
+    age_max=models.IntegerField(null=True)
+    classification = models.CharField(max_length=5, choices=CLASSFICATION_CHOICES)
+    gender = models.CharField(max_length=2, choices=GENDER_CHOICES)
+    size = models.IntegerField()
     location = models.CharField(max_length=100,blank=True, null=True)
     country = models.CharField(max_length=100,blank=True, null=True)
     start_date = models.DateField()

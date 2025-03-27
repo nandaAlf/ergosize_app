@@ -3,9 +3,10 @@ from app1.models import AnthropometricStatistic, AnthropometricTable, Person, Me
 
 
 class DimensionSerializer(serializers.ModelSerializer):
+    id_dimension = serializers.IntegerField(source='id')
     class Meta:
         model = Dimension
-        fields = '__all__'
+        fields = ['id_dimension', 'name', 'initial']
         extra_kwargs = {
             'name': {'validators': []}  # Desactiva los validadores de unicidad
         }
@@ -57,9 +58,14 @@ class PersonSerializer(serializers.ModelSerializer):
 
 
 class StudyDimensionSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source='id_dimension.name', read_only=True)
+    initial = serializers.CharField(source='id_dimension.initial', read_only=True)
     class Meta:
         model = StudyDimension
-        fields = ['id_dimension']
+        fields = ['id_dimension','name','initial']
+        extra_kwargs = {
+            'id_dimension': {'write_only': False}  # El id_dimension es necesario para escritura
+        }
 
 class AnthropometricStatisticSerializer(serializers.ModelSerializer):
     dimension = DimensionSerializer()
@@ -116,7 +122,7 @@ class StudySerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Study
-        fields = ['name', 'id', 'description', 'location', 'country', 'start_date', 'end_date', 'dimensions']
+        fields = ['name','size', 'id', 'description', 'location', 'country', 'start_date', 'end_date', 'dimensions','age_min','age_max','classification','gender']
 
     def create(self, validated_data):
         # Extraer los datos de las dimensiones si están presentes
