@@ -110,33 +110,33 @@ class Measurement(models.Model):
 #     def __str__(self):
 #         return self.name
 
-class AnthropometricTable(models.Model):
-    # study = models.OneToOneField(Study, on_delete=models.CASCADE, )
-    study = models.ForeignKey(Study, on_delete=models.CASCADE)
-    name = models.CharField(max_length=100, null=True)  # Nombre opcional para la tabla
-    description = models.TextField(blank=True, null=True)  # Descripción opcional
-    dimension = models.ManyToManyField(Dimension, through='AnthropometricStatistic')
+# class AnthropometricTable(models.Model):
+#     # study = models.OneToOneField(Study, on_delete=models.CASCADE, )
+#     study = models.ForeignKey(Study, on_delete=models.CASCADE)
+#     name = models.CharField(max_length=100, null=True)  # Nombre opcional para la tabla
+#     description = models.TextField(blank=True, null=True)  # Descripción opcional
+#     dimension = models.ManyToManyField(Dimension, through='AnthropometricStatistic')
 
-    def __str__(self):
-        return f"Tabla Antropométrica de {self.study.name}"
+#     def __str__(self):
+#         return f"Tabla Antropométrica de {self.study.name}"
 
 
-class AnthropometricStatistic(models.Model):
-    table = models.ForeignKey(AnthropometricTable, on_delete=models.CASCADE)
-    dimension = models.ForeignKey(Dimension, on_delete=models.CASCADE)
-    mean = models.FloatField()
-    sd = models.FloatField()
-    percentile_5 = models.FloatField(blank=True, null=True)
-    percentile_10 = models.FloatField(blank=True, null=True)
-    percentile_25 = models.FloatField(blank=True, null=True)
-    percentile_50 = models.FloatField(blank=True, null=True)
-    percentile_75 = models.FloatField(blank=True, null=True)
-    percentile_90 = models.FloatField(blank=True, null=True)
-    percentile_95 = models.FloatField(blank=True, null=True)
+# class AnthropometricStatistic(models.Model):
+#     table = models.ForeignKey(AnthropometricTable, on_delete=models.CASCADE)
+#     dimension = models.ForeignKey(Dimension, on_delete=models.CASCADE)
+#     mean = models.FloatField()
+#     sd = models.FloatField()
+#     percentile_5 = models.FloatField(blank=True, null=True)
+#     percentile_10 = models.FloatField(blank=True, null=True)
+#     percentile_25 = models.FloatField(blank=True, null=True)
+#     percentile_50 = models.FloatField(blank=True, null=True)
+#     percentile_75 = models.FloatField(blank=True, null=True)
+#     percentile_90 = models.FloatField(blank=True, null=True)
+#     percentile_95 = models.FloatField(blank=True, null=True)
 
-    class Meta:
-      unique_together = ('table', 'dimension')
+#     class Meta:
+#       unique_together = ('table', 'dimension')
                        
-    def __str__(self):
-        return f"{self.dimension.name} - {self.table.study.name}"
+#     def __str__(self):
+#         return f"{self.dimension.name} - {self.table.study.name}"
 

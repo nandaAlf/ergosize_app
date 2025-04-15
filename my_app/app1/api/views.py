@@ -1,8 +1,9 @@
+from datetime import date
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.response import Response
-from app1.models import AnthropometricStatistic, AnthropometricTable, Person, Measurement, Study, Dimension, StudyDimension
-from app1.api.serializer import AnthropometricStatisticSerializer, AnthropometricTableSerializer, PersonSerializer, MeasurementSerializer, StudyDimensionSerializer, StudySerializer, DimensionSerializer
+from app1.models import Person, Measurement, Study, Dimension, StudyDimension
+from app1.api.serializer import  PersonSerializer, MeasurementSerializer, StudyDimensionSerializer, StudySerializer, DimensionSerializer
 from django.http import JsonResponse
 from django.views import View
 from django.db import connection
@@ -63,49 +64,44 @@ class StudyDimensionViewSet(viewsets.ModelViewSet):
     queryset = StudyDimension.objects.all()
     serializer_class = StudyDimensionSerializer
 
-class AnthropometricTableViewSet(viewsets.ModelViewSet):
-    queryset = AnthropometricTable.objects.all()
-    serializer_class = AnthropometricTableSerializer
+# class AnthropometricTableViewSet(viewsets.ModelViewSet):
+    # queryset = AnthropometricTable.objects.all()
+    # serializer_class = AnthropometricTableSerializer
     
-    def create(self, request, *args, **kwargs):
-        study_id = request.data.get("study")
-        statistics_data = request.data.get("statistics", [])
+    # def create(self, request, *args, **kwargs):
+    #     study_id = request.data.get("study")
+    #     statistics_data = request.data.get("statistics", [])
 
-        try:
-            study = Study.objects.get(id=study_id)
-            table = AnthropometricTable.objects.create(study=study)
+    #     try:
+    #         study = Study.objects.get(id=study_id)
+    #         table = AnthropometricTable.objects.create(study=study)
 
-            for stat in statistics_data:
-                measurement_type = Dimension.objects.get(id=stat["measurement_type"])
-                AnthropometricStatistic.objects.create(
-                    table=table,
-                    measurement_type=measurement_type,
-                    mean=stat["mean"],
-                    sd=stat["sd"],
-                    percentile_5=stat.get("percentile_5"),
-                    percentile_10=stat.get("percentile_10"),
-                    percentile_25=stat.get("percentile_25"),
-                    percentile_50=stat.get("percentile_50"),
-                    percentile_75=stat.get("percentile_75"),
-                    percentile_90=stat.get("percentile_90"),
-                    percentile_95=stat.get("percentile_95")
-                )
+    #         for stat in statistics_data:
+    #             measurement_type = Dimension.objects.get(id=stat["measurement_type"])
+    #             AnthropometricStatistic.objects.create(
+    #                 table=table,
+    #                 measurement_type=measurement_type,
+    #                 mean=stat["mean"],
+    #                 sd=stat["sd"],
+    #                 percentile_5=stat.get("percentile_5"),
+    #                 percentile_10=stat.get("percentile_10"),
+    #                 percentile_25=stat.get("percentile_25"),
+    #                 percentile_50=stat.get("percentile_50"),
+    #                 percentile_75=stat.get("percentile_75"),
+    #                 percentile_90=stat.get("percentile_90"),
+    #                 percentile_95=stat.get("percentile_95")
+    #             )
 
-            return Response({"message": "Tabla creada correctamente"}, status=status.HTTP_201_CREATED)
-        except Study.DoesNotExist:
-            return Response({"error": "El estudio no existe"}, status=status.HTTP_400_BAD_REQUEST)
-        except Dimension.DoesNotExist:
-            return Response({"error": "El tipo de medición no existe"}, status=status.HTTP_400_BAD_REQUEST)
+    #         return Response({"message": "Tabla creada correctamente"}, status=status.HTTP_201_CREATED)
+    #     except Study.DoesNotExist:
+    #         return Response({"error": "El estudio no existe"}, status=status.HTTP_400_BAD_REQUEST)
+    #     except Dimension.DoesNotExist:
+    #         return Response({"error": "El tipo de medición no existe"}, status=status.HTTP_400_BAD_REQUEST)
 
-class AnthropometricStatisticViewSet(viewsets.ModelViewSet):
-    queryset = AnthropometricStatistic.objects.all()
-    serializer_class = AnthropometricStatisticSerializer
+# class AnthropometricStatisticViewSet(viewsets.ModelViewSet):
+#     queryset = AnthropometricStatistic.objects.all()
+#     serializer_class = AnthropometricStatisticSerializer
 
-
-from django.http import JsonResponse
-from django.views import View
-from django.db import connection
-from django.shortcuts import get_object_or_404
 
 class StudyDataView(View):
     """
@@ -227,88 +223,182 @@ class StudyDataView(View):
 
 
 class Perceptil(View):
-    def calculate_percentiles_for_study(self, study_id):
+
+    def calculate_percentiles_for_study(self, study_id, gender=None, age_min=None, age_max=None, dimensions_filter=None, percentiles_list=None):
         # Obtener el estudio
         study = Study.objects.get(id=study_id)
-        
+    
+        # Si no se indica percentiles, se usan los siguientes valores por defecto.
+        if percentiles_list is None:
+            percentiles_list = [5, 10, 25, 50, 75, 90, 95]
+
 
         # Crear o obtener la tabla antropométrica asociada al estudio
-        table, created = AnthropometricTable.objects.get_or_create(study=study)
+        # table, created = AnthropometricTable.objects.get_or_create(study=study)
         
         # Obtener todas las dimensiones asociadas al estudio
-        dimensions = Dimension.objects.filter(dimension_study__id_study=study)
-        
+        # Se filtran por 'dimensions_filter' si éste es proporcionado (se espera una lista de nombres).
+        dimensions_qs = Dimension.objects.filter(dimension_study__id_study=study)
+        # print(dimensions_qs)
+        if dimensions_filter:
+            dimensions_qs = dimensions_qs.filter(id__in=dimensions_filter)
+        print(dimensions_filter)
+        # dimensions = Dimension.objects.filter(dimension_study__id_study=study)
+        # Obtener todas las dimensiones asociadas al estudio
+
+    
+        # print(dimensions.id_dimension or "n")
         results = []  # Lista para almacenar los resultados
         
-        for dimension in dimensions:
+        for dimension in dimensions_qs:
             # Obtener todas las mediciones para esta dimensión en el estudio
             measurements = Measurement.objects.filter(study=study, dimension=dimension)
-            values = measurements.values_list('value', flat=True)
+            filtered_values = []
+            # Procesar cada medición para aplicar filtros adicionales sobre la persona asociada
+            for measurement in measurements:
+                person = measurement.person
+                # print(person or "kkk")
+
+                # Filtrar por género si se indicó
+                if gender and person.gender != gender:
+                    continue
+
+                # Filtrar por rango de edad (calculado a partir de date_of_birth)
+                if (age_min or age_max) and person.date_of_birth  and measurement.date:
+                    measurement_date = measurement.date.date() 
+                    birth_date = person.date_of_birth
+                
+                    age = measurement_date.year - birth_date.year - (
+                        (measurement_date.month, measurement_date.day) < (birth_date.month, birth_date.day)
+                    )
+                    if age_min and age < age_min:
+                        continue
+                    if age_max and age > age_max:
+                        continue
             
-            if len(values) > 0:  # Solo calcular si hay mediciones
-                # Calcular estadísticas
-                mean = np.mean(values)
-                sd = np.std(values)
-                percentiles = np.percentile(values, [5, 10, 25, 50, 75, 90, 95])
-                
-                # Crear o actualizar la estadística en AnthropometricStatistic
-                stat, created = AnthropometricStatistic.objects.get_or_create(
-                    table=table,
-                    dimension=dimension,
-                    defaults={
-                        'mean': mean,
-                        'sd': sd,
-                        'percentile_5': percentiles[0],
-                        'percentile_10': percentiles[1],
-                        'percentile_25': percentiles[2],
-                        'percentile_50': percentiles[3],
-                        'percentile_75': percentiles[4],
-                        'percentile_90': percentiles[5],
-                        'percentile_95': percentiles[6],
-                    }
-                )
-                
-                if not created:
-                    # Si ya existe, actualizar los valores
-                    stat.mean = mean
-                    stat.sd = sd
-                    stat.percentile_5 = percentiles[0]
-                    stat.percentile_10 = percentiles[1]
-                    stat.percentile_25 = percentiles[2]
-                    stat.percentile_50 = percentiles[3]
-                    stat.percentile_75 = percentiles[4]
-                    stat.percentile_90 = percentiles[5]
-                    stat.percentile_95 = percentiles[6]
-                    stat.save()
-                
-                # Agregar los resultados a la lista
+                filtered_values.append(measurement.value)
+             
+            if filtered_values:
+                mean = float(np.mean(filtered_values))
+                sd = float(np.std(filtered_values))
+                # Calcular los percentiles según la lista especificada
+                percentiles = np.percentile(filtered_values, percentiles_list)
+                # Convertir el resultado a un diccionario con claves como strings
+                percentiles_dict = {str(p): float(val) for p, val in zip(percentiles_list, percentiles)}
+
                 results.append({
                     'dimension': dimension.name,
                     'mean': mean,
                     'sd': sd,
-                    'percentiles': {
-                        '5': percentiles[0],
-                        '10': percentiles[1],
-                        '25': percentiles[2],
-                        '50': percentiles[3],
-                        '75': percentiles[4],
-                        '90': percentiles[5],
-                        '95': percentiles[6],
-                    }
+                    'percentiles': percentiles_dict
                 })
+            
+        
+            
+            # values = measurements.values_list('value', flat=True)
+            
+            # if values:  # Solo calcular si hay mediciones
+            #     # Calcular estadísticas
+            #     mean = np.mean(values)
+            #     sd = np.std(values)
+            #     percentiles = np.percentile(values, [5, 10, 25, 50, 75, 90, 95])
+                
+                # Crear o actualizar la estadística en AnthropometricStatistic
+                # stat, created = AnthropometricStatistic.objects.get_or_create(
+                    # table=table,
+                #     dimension=dimension,
+                #     defaults={
+                #         'mean': mean,
+                #         'sd': sd,
+                #         'percentile_5': percentiles[0],
+                #         'percentile_10': percentiles[1],
+                #         'percentile_25': percentiles[2],
+                #         'percentile_50': percentiles[3],
+                #         'percentile_75': percentiles[4],
+                #         'percentile_90': percentiles[5],
+                #         'percentile_95': percentiles[6],
+                #     }
+                # )
+                
+                # if not created:
+                    # Si ya existe, actualizar los valores
+                    # stat.mean = mean
+                    # stat.sd = sd
+                    # stat.percentile_5 = percentiles[0]
+                    # stat.percentile_10 = percentiles[1]
+                    # stat.percentile_25 = percentiles[2]
+                    # stat.percentile_50 = percentiles[3]
+                    # stat.percentile_75 = percentiles[4]
+                    # stat.percentile_90 = percentiles[5]
+                    # stat.percentile_95 = percentiles[6]
+                    # stat.save()
+                
+                # Agregar los resultados a la lista
+                # results.append({
+                #     'dimension': dimension.name,
+                #     'mean': mean,
+                #     'sd': sd,
+                #     'percentiles': {
+                #         '5': percentiles[0],
+                #         '10': percentiles[1],
+                #         '25': percentiles[2],
+                #         '50': percentiles[3],
+                #         '75': percentiles[4],
+                #         '90': percentiles[5],
+                #         '95': percentiles[6],
+                #     }
+                # })
         
         return results
 
-    def get(self, request, study_id):
+    def get(self, request,study_id):
         # Obtener el ID del estudio desde los parámetros de la solicitud GET
         # study_id = request.GET.get('study_id')
-        
         if not study_id:
-            return JsonResponse({"status": "error", "message": "El parámetro 'study_id' es requerido."}, status=400)
+            return JsonResponse(
+                {"status": "error", "message": "El parámetro 'study_id' es requerido."}, 
+                status=400)
+        
+        # Extracción de parámetros vía GET:
+        #   gender: "M" o "F"
+        gender = request.GET.get('gender', None)
+        if gender and gender not in ['M', 'F']:
+            return JsonResponse({"status": "error", "message": "Valor de género inválido. Use 'M' o 'F'."}, status=400)
+
+        #   age_min y age_max: se convierten a entero si están proporcionados
+        age_min = request.GET.get('age_min', None)
+        age_max = request.GET.get('age_max', None)
+        try:
+            age_min = int(age_min) if age_min else None
+            age_max = int(age_max) if age_max else None
+        except ValueError:
+            return JsonResponse({"status": "error", "message": "age_min y age_max deben ser números enteros."}, status=400)
+
+        #   dimensions: se espera una lista separada por comas (por ejemplo: "Altura,Peso")
+        dimensions_filter = request.GET.get('dimensions', None)
+        if dimensions_filter:
+            dimensions_filter = [d.strip() for d in dimensions_filter.split(',')]
+
+        #   percentiles: lista separada por comas (por ejemplo: "5,95"). Se convierten a float.
+        percentiles_param = request.GET.get('percentiles', None)
+        if percentiles_param:
+            try:
+                percentiles_list = [float(p.strip()) for p in percentiles_param.split(',')]
+            except ValueError:
+                return JsonResponse({"status": "error", "message": "El parámetro 'percentiles' debe contener números separados por comas."}, status=400)
+        else:
+            percentiles_list = None
+
+  
         
         try:
             # Calcular los percentiles y obtener los resultados
-            results = self.calculate_percentiles_for_study(study_id)
+            results = self.calculate_percentiles_for_study(study_id, gender=gender,
+                age_min=age_min,
+                age_max=age_max,
+                dimensions_filter=dimensions_filter,
+                percentiles_list=percentiles_list
+                )
             
             # Devolver los resultados en formato JSON
             return JsonResponse({
