@@ -1,13 +1,16 @@
-from datetime import date
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from app1.models import Person, Measurement, Study, Dimension, StudyDimension
 from app1.api.serializer import  PersonSerializer, MeasurementSerializer, StudyDimensionSerializer, StudySerializer, DimensionSerializer
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.views import View
 from django.db import connection
 import numpy as np
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from openpyxl.utils import get_column_letter
+from openpyxl.cell.cell import MergedCell
 
 class PersonViewSet(viewsets.ModelViewSet):
     queryset = Person.objects.all()
@@ -220,11 +223,8 @@ class StudyDataView(View):
             "persons": list(data.values())  # Lista de personas con sus mediciones
         }
         
-
-
-class Perceptil(View):
-
-    def calculate_percentiles_for_study(self, study_id, gender=None, age_min=None, age_max=None, dimensions_filter=None, percentiles_list=None):
+#MOVER A UTILS
+def calculate_percentiles_for_study(study_id, gender=None, age_min=None, age_max=None, dimensions_filter=None, percentiles_list=None):
         # Obtener el estudio
         study = Study.objects.get(id=study_id)
     
@@ -288,69 +288,15 @@ class Perceptil(View):
 
                 results.append({
                     'dimension': dimension.name,
+                    'dimension_id': dimension.id,	
                     'mean': mean,
                     'sd': sd,
                     'percentiles': percentiles_dict
                 })
-            
-        
-            
-            # values = measurements.values_list('value', flat=True)
-            
-            # if values:  # Solo calcular si hay mediciones
-            #     # Calcular estadísticas
-            #     mean = np.mean(values)
-            #     sd = np.std(values)
-            #     percentiles = np.percentile(values, [5, 10, 25, 50, 75, 90, 95])
-                
-                # Crear o actualizar la estadística en AnthropometricStatistic
-                # stat, created = AnthropometricStatistic.objects.get_or_create(
-                    # table=table,
-                #     dimension=dimension,
-                #     defaults={
-                #         'mean': mean,
-                #         'sd': sd,
-                #         'percentile_5': percentiles[0],
-                #         'percentile_10': percentiles[1],
-                #         'percentile_25': percentiles[2],
-                #         'percentile_50': percentiles[3],
-                #         'percentile_75': percentiles[4],
-                #         'percentile_90': percentiles[5],
-                #         'percentile_95': percentiles[6],
-                #     }
-                # )
-                
-                # if not created:
-                    # Si ya existe, actualizar los valores
-                    # stat.mean = mean
-                    # stat.sd = sd
-                    # stat.percentile_5 = percentiles[0]
-                    # stat.percentile_10 = percentiles[1]
-                    # stat.percentile_25 = percentiles[2]
-                    # stat.percentile_50 = percentiles[3]
-                    # stat.percentile_75 = percentiles[4]
-                    # stat.percentile_90 = percentiles[5]
-                    # stat.percentile_95 = percentiles[6]
-                    # stat.save()
-                
-                # Agregar los resultados a la lista
-                # results.append({
-                #     'dimension': dimension.name,
-                #     'mean': mean,
-                #     'sd': sd,
-                #     'percentiles': {
-                #         '5': percentiles[0],
-                #         '10': percentiles[1],
-                #         '25': percentiles[2],
-                #         '50': percentiles[3],
-                #         '75': percentiles[4],
-                #         '90': percentiles[5],
-                #         '95': percentiles[6],
-                #     }
-                # })
         
         return results
 
+class Perceptil(View):
     def get(self, request,study_id):
         # Obtener el ID del estudio desde los parámetros de la solicitud GET
         # study_id = request.GET.get('study_id')
@@ -393,7 +339,7 @@ class Perceptil(View):
         
         try:
             # Calcular los percentiles y obtener los resultados
-            results = self.calculate_percentiles_for_study(study_id, gender=gender,
+            results = calculate_percentiles_for_study(study_id, gender=gender,
                 age_min=age_min,
                 age_max=age_max,
                 dimensions_filter=dimensions_filter,
@@ -410,3 +356,153 @@ class Perceptil(View):
             return JsonResponse({"status": "error", "message": f"El estudio con ID {study_id} no existe."}, status=404)
         except Exception as e:
             return JsonResponse({"status": "error", "message": str(e)}, status=500)
+
+
+def export_excel_percentiles(request, study_id):
+    try:
+        study = Study.objects.get(id=study_id)
+        name_study = request.GET.get('name', f"Estudio {study_id}")
+        gender = request.GET.get('gender')
+        age_min = int(request.GET.get('age_min')) if request.GET.get('age_min') else None
+        age_max = int(request.GET.get('age_max')) if request.GET.get('age_max') else None
+        dimensions_filter = request.GET.get('dimensions')
+        if dimensions_filter:
+            dimensions_filter = [int(x) for x in dimensions_filter.split(',')]
+
+        percentiles = request.GET.get('percentiles')
+        if percentiles:
+            percentiles_list = [float(p) for p in percentiles.split(',')]
+        else:
+            percentiles_list = [5, 10, 25, 50, 75, 90, 95]
+
+        results = calculate_percentiles_for_study(
+            study_id,
+            gender=gender,
+            age_min=age_min,
+            age_max=age_max,
+            dimensions_filter=dimensions_filter,
+            percentiles_list=percentiles_list
+        )
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Percentiles"
+
+        # --- Estilos
+        header_font = Font(bold=True)
+        title_font = Font(size=14, bold=True)
+        center_align = Alignment(horizontal="center")
+        left_align = Alignment(horizontal="left")
+        fill_gray = PatternFill("solid", fgColor="DDDDDD")
+        border_thin = Border(
+            left=Side(style='thin'), right=Side(style='thin'),
+            top=Side(style='thin'), bottom=Side(style='thin')
+        )
+
+        total_columnas = 3 + len(percentiles_list)
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_columnas)
+        title_cell = ws.cell(row=1, column=1)
+        title_cell.value = f"Tabla antropométrica: {name_study}"
+        title_cell.font = title_font
+        title_cell.alignment = center_align
+        title_cell.fill = fill_gray  # Azul claro
+
+
+        ws.append(["Fecha inicio:", study.start_date, "Fecha fin:",study.end_date])
+        ws.append(["Muestra:", study.size,"Genero:", gender if gender else "Mixto"])
+        ws.append(["Edad mínima:", age_min if age_min is not None else "—","Edad máxima:", age_max if age_max is not None else "—"])
+        ws.append(["Descripción:"])
+        # Escribir la descripción en la fila siguiente, fusionando columnas desde B en adelante
+        desc_row = ws.max_row 
+        ws.merge_cells(start_row=desc_row, start_column=2, end_row=desc_row, end_column=total_columnas)
+        desc_cell = ws.cell(row=desc_row, column=2)
+        desc_cell.value = study.description
+        desc_cell.alignment = Alignment(wrap_text=True, vertical="top")  # Ajuste de texto
+        ws.append([]) 
+
+        # Aplicar formato a metadatos
+        for row in ws.iter_rows(min_row=2, max_row=6):
+            for cell in row:
+                cell.alignment = left_align
+                cell.font = Font(bold=isinstance(cell.value, str) and cell.value.endswith(':'))
+
+        # --- Encabezados
+        headers = ["Dimensión", "Media", "SD"] + [f"P{p}" for p in percentiles_list]
+        ws.append(headers)
+        for i, header in enumerate(headers, start=1):
+            cell = ws.cell(row=ws.max_row, column=i)
+            cell.font = header_font
+            cell.alignment = center_align
+            cell.fill = fill_gray
+            cell.border = border_thin
+
+        # --- Datos
+        for res in results:
+            row = [
+                res["dimension"],
+                res["mean"],
+                res["sd"],
+            ] + [res["percentiles"].get(str(p), '') for p in percentiles_list]
+            ws.append(row)
+            for i, val in enumerate(row, start=1):
+                cell = ws.cell(row=ws.max_row, column=i)
+                cell.alignment = center_align
+                cell.border = border_thin
+
+        # --- Ajustar ancho de columnas automáticamente
+        for column_cells in ws.columns:
+            for cell in column_cells:
+                if not isinstance(cell, MergedCell):
+                    col_letter = get_column_letter(cell.column)
+                    break
+            else:
+                continue
+            max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in column_cells)
+            ws.column_dimensions[col_letter].width = max_length + 2
+
+        # --- Respuesta
+        response = HttpResponse(
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        response["Content-Disposition"] = f'attachment; filename="percentiles_study_{study_id}.xlsx"'
+        wb.save(response)
+        return response
+    except Study.DoesNotExist:
+          return HttpResponse("Estudio no encontrado.", status=404)
+      
+      
+from openpyxl import load_workbook
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+
+@csrf_exempt
+def preview_excel_percentiles(request):
+    if request.method == "POST" and request.FILES.get("archivo"):
+        archivo = request.FILES["archivo"]
+        wb = load_workbook(archivo)
+        ws = wb["Percentiles"]
+
+        data = []
+        headers = []
+        for i, row in enumerate(ws.iter_rows(min_row=8, values_only=True), start=8):
+            if i == 8:
+                headers = row
+                continue
+            if not any(row):
+                continue
+
+            item = {
+                "dimension": row[0],
+                "mean": row[1],
+                "sd": row[2],
+                "percentiles": {}
+            }
+            for j, value in enumerate(row[3:], start=3):
+                if headers[j]:
+                    key = str(headers[j]).replace("P", "")
+                    item["percentiles"][key] = value
+            data.append(item)
+
+        return JsonResponse(data, safe=False)
+
+    return JsonResponse({"error": "Archivo no proporcionado o método incorrecto"}, status=400)
