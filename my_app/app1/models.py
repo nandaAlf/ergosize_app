@@ -1,5 +1,5 @@
 from django.db import models
-
+from django.utils import timezone
 # Create your models here.
 class Person(models.Model):
     GENDER_CHOICES = [
@@ -94,8 +94,8 @@ class Measurement(models.Model):
     value = models.FloatField()
     # position = models.BooleanField(choices=POSITION_CHOICES)
     position = models.CharField(max_length=2, choices=POSITION_CHOICES)  # Ahora más flexible
-    date = models.DateTimeField(auto_now_add=True)
-
+    # date = models.DateTimeField(auto_now_add=True)
+    date = models.DateTimeField(default=timezone.now)
     class Meta:
       unique_together = ('study','person', 'dimension')
 

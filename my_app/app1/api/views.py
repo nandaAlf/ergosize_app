@@ -11,6 +11,16 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.cell.cell import MergedCell
+from io import BytesIO
+from django.http import HttpResponse
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+from openpyxl import load_workbook
+from django.views.decorators.csrf import csrf_exempt
+import io
+
 
 class PersonViewSet(viewsets.ModelViewSet):
     queryset = Person.objects.all()
@@ -469,14 +479,14 @@ def export_excel_percentiles(request, study_id):
         return response
     except Study.DoesNotExist:
           return HttpResponse("Estudio no encontrado.", status=404)
+   
+   
       
-      
-from openpyxl import load_workbook
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-
 @csrf_exempt
 def preview_excel_percentiles(request):
+    print(request.method)
+    print(request.FILES)
+    print("Archivo recibido:", request.FILES.get("archivo"))
     if request.method == "POST" and request.FILES.get("archivo"):
         archivo = request.FILES["archivo"]
         wb = load_workbook(archivo)
@@ -506,3 +516,244 @@ def preview_excel_percentiles(request):
         return JsonResponse(data, safe=False)
 
     return JsonResponse({"error": "Archivo no proporcionado o método incorrecto"}, status=400)
+
+def export_pdf_percentiles(request, study_id):
+    try:
+        # Obtener parámetros y estudio de igual forma que en Excel
+        study = Study.objects.get(id=study_id)
+        name_study = request.GET.get('name', f"Estudio {study_id}")
+        gender = request.GET.get('gender')
+        age_min = request.GET.get('age_min')
+        age_max = request.GET.get('age_max')
+        age_min = int(age_min) if age_min else None
+        age_max = int(age_max) if age_max else None
+
+        dimensions_filter = request.GET.get('dimensions')
+        dimensions_filter = [int(x) for x in dimensions_filter.split(',')] if dimensions_filter else None
+
+        percentiles = request.GET.get('percentiles')
+        percentiles_list = [float(p) for p in percentiles.split(',')] if percentiles else [5, 10, 25, 50, 75, 90, 95]
+
+        results = calculate_percentiles_for_study(
+            study_id,
+            gender=gender,
+            age_min=age_min,
+            age_max=age_max,
+            dimensions_filter=dimensions_filter,
+            percentiles_list=percentiles_list
+        )
+
+        # Preparar el documento PDF en memoria
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, title=f"Tabla antropométrica: {name_study}")
+
+        styles = getSampleStyleSheet()
+        # Estilos personalizados
+        title_style = styles["Title"]
+        title_style.alignment = 1  # Centrado
+
+        header_style = styles["Heading4"]
+        normal_style = styles["Normal"]
+        normal_style.spaceAfter = 8
+
+        elements = []
+
+        # Título
+        elements.append(Paragraph(f"Tabla antropométrica: {name_study}", title_style))
+        elements.append(Spacer(1, 12))
+
+        # Metadatos (usamos una tabla para organizarlos, de 4 columnas)
+        meta_data = [
+            ["Fecha inicio:", str(study.start_date), "Fecha fin:", str(study.end_date)],
+            ["Muestra:", str(study.size), "Género:", gender if gender else "Mixto"],
+            ["Edad mínima:", str(age_min) if age_min is not None else "—", "Edad máxima:", str(age_max) if age_max is not None else "—"],
+        ]
+        meta_table = Table(meta_data, hAlign="LEFT", colWidths=[80, 120, 80, 120])
+        meta_table.setStyle(TableStyle([
+            ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+            ('FONTSIZE', (0,0), (-1,-1), 10),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+        ]))
+        elements.append(meta_table)
+        elements.append(Spacer(1, 12))
+
+        # Descripción: cabecera y texto en un párrafo aparte
+        elements.append(Paragraph("Descripción:", header_style))
+        elements.append(Paragraph(study.description, normal_style))
+        elements.append(Spacer(1, 12))
+
+        # Preparar datos para la tabla de resultados
+        # Encabezados
+        headers = ["Dimensión", "Media", "SD"] + [f"P{p}" for p in percentiles_list]
+        data_table = [headers]
+        
+        # Agregar cada fila de resultados
+        for res in results:
+            row = [
+                res["dimension"],
+                round(res["mean"], 2),
+                round(res["sd"], 2),
+            ]
+            row += [res["percentiles"].get(str(p), '') for p in percentiles_list]
+            data_table.append(row)
+        
+        # Crear tabla con estilos
+        table = Table(data_table, hAlign="CENTER")
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.lightblue),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,0), 10),
+            ('BOTTOMPADDING', (0,0), (-1,0), 8),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ]))
+        elements.append(table)
+        elements.append(Spacer(1, 12))
+
+        # Construir el documento
+        doc.build(elements)
+
+        buffer.seek(0)
+        response = HttpResponse(buffer, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="percentiles_study_{study_id}.pdf"'
+        return response
+
+    except Study.DoesNotExist:
+        return HttpResponse("Estudio no encontrado.", status=404)
+    except Exception as e:
+        return HttpResponse(f"Ocurrió un error: {str(e)}", status=500)
+
+def generar_pdf_ficha(request):
+    datos = {
+        "nombre": "Fernanda Alfonso",
+        "sexo": "Femenino",
+        "pais": "Cuba",
+        "estado": "UCLV",
+        "fecha_nacimiento": "2000/01/01",
+        # "lugar_de_medicion": "Cuba",
+        # "objetivo_medicion": "Evaluación de la salud",
+        "medidas_erecto": [
+            {"nombre": "Altura", "valor": 160},
+            {"nombre": "Distancia entre ojos", "valor": 20},
+            {"nombre": "Altura", "valor": 160},
+            {"nombre": "Distancia entre ojos", "valor": 20}
+        ],
+        "medidas_sentado": [
+            {"nombre": "Circunferencia de la cadera", "valor": 60},
+            {"nombre": "Distancia entre ojos", "valor": 4}
+        ],
+        "control": {
+            "fecha": "2025/04/30",
+            "inicio": "2020/01/02",
+            "fin": "2023/03/03",
+            "responsable": "Pedro Suarez",
+            "supervisor": "Roberto Carlos",
+            "dimensiones": "en mm",
+            "peso": "50"
+        }
+    }
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    styles = getSampleStyleSheet()
+    styleN = styles["Normal"]
+    styleB = styles["Heading4"]
+
+    contenido = []
+
+    def p(texto, estilo=styleN):
+        return Paragraph(texto, estilo)
+
+    # Construimos todas las filas de una sola tabla
+    tabla = []
+
+    # Título principal (fila combinada)
+    # tabla.append([p("<b>Ficha de recoleción de datos </b>", styleB), '', ''])
+    tabla.append([p("<b>Ficha de recoleccion de datos antropométricos</b>"), '', ''])
+
+    # Fila: nombre y sexo
+    tabla.append([
+        p("Nombre: {}".format(datos["nombre"])),
+        p("Sexo: {}".format(datos["sexo"])),
+        ''
+    ])
+
+    # Fila: país, estado, fecha de nacimiento
+    tabla.append([
+        p("País: {}".format(datos["pais"])),
+        p("Estado: {}".format(datos["estado"])),
+        p("Fecha de nacimiento: {}".format(datos["fecha_nacimiento"]))
+    ])
+
+    # Subtítulo: Medidas en posición erecto
+    tabla.append([p("<b>Medidas en posición erecto</b>"), '', ''])
+
+    # Encabezado tabla erecto
+    tabla.append([p("<b>No</b>"), p("<b>Nombre</b>"), p("<b>Valor (mm)</b>")])
+
+    # Datos erecto
+    for i, m in enumerate(datos["medidas_erecto"], start=1):
+        tabla.append([str(i), m["nombre"], str(m["valor"])])
+
+    # Subtítulo: Medidas en posición sentado
+    tabla.append([p("<b>Medidas en posición sentado</b>"), '', ''])
+
+    # Encabezado tabla sentado
+    tabla.append([p("<b>No</b>"), p("<b>Nombre</b>"), p("<b>Valor (mm)</b>")])
+
+    for i, m in enumerate(datos["medidas_sentado"], start=1):
+        tabla.append([str(i), m["nombre"], str(m["valor"])])
+
+    # Subtítulo: Control
+    tabla.append([p("<b>Control</b>"), '', ''])
+
+    # Fila: fecha, inicio, fin
+    tabla.append([
+        p("Fecha: {}".format(datos["control"]["fecha"])),
+        p("Inicio: {}".format(datos["control"]["inicio"])),
+        p("Fin: {}".format(datos["control"]["fin"]))
+    ])
+
+    # Fila: responsable, supervisor
+    tabla.append([
+        p("Responsable: {}".format(datos["control"]["responsable"])),
+        p("Supervisor: {}".format(datos["control"]["supervisor"])),
+        ''
+    ])
+
+    # Fila: dimensiones y peso
+    tabla.append([
+        p("Dimensiones: {}".format(datos["control"]["dimensiones"])),
+        p("Peso: {} kg".format(datos["control"]["peso"])),
+        ''
+    ])
+
+    # Definir tabla como una sola gran tabla con columnas
+    t = Table(tabla, colWidths=[180, 180, 180])
+
+    # Estilo de la tabla
+    estilo = TableStyle([
+        ('GRID', (0, 0), (-1, -1), 0.8, colors.black),
+        ('SPAN', (0, 0), (-1, 0)),  # Título
+        ('SPAN', (0, 3), (-1, 3)),  # Subtítulo erecto
+        ('SPAN', (0, 5 + len(datos["medidas_erecto"])), (-1, 5 + len(datos["medidas_erecto"]))),  # Subtítulo sentado
+        ('SPAN', (0, 7 + len(datos["medidas_erecto"]) + len(datos["medidas_sentado"])), (-1, 7 + len(datos["medidas_erecto"]) + len(datos["medidas_sentado"]))),  # Subtítulo control
+        # ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),  # título
+        # ('BACKGROUND', (0, 3), (-1, 3), colors.lightgrey),
+        # ('BACKGROUND', (0, 6 + len(datos["medidas_erecto"])), (-1, 6 + len(datos["medidas_erecto"])), colors.lightgrey),
+        # ('BACKGROUND', (0, 9 + len(datos["medidas_erecto"]) + len(datos["medidas_sentado"])), (-1, 9 + len(datos["medidas_erecto"]) + len(datos["medidas_sentado"])), colors.lightgrey),
+        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+    ])
+
+    t.setStyle(estilo)
+
+    contenido.append(t)
+    doc.build(contenido)
+
+    buffer.seek(0)
+    return HttpResponse(buffer, content_type='application/pdf', headers={
+        'Content-Disposition': f'attachment; filename="ficha_{datos["nombre"]}.pdf"'
+    })
