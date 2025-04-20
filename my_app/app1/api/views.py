@@ -23,6 +23,7 @@ from django.views.decorators.csrf import csrf_exempt
 import io
 
 
+
 class PersonViewSet(viewsets.ModelViewSet):
     queryset = Person.objects.all()
     serializer_class = PersonSerializer
