@@ -1,0 +1,121 @@
+# from rest_framework.permissions import BasePermission
+
+# class IsAdmin(BasePermission):
+#     def has_permission(self, request, view):
+#         return request.user.is_authenticated and request.user.role == 'admin'
+
+# class IsInvestigator(BasePermission):
+#     def has_permission(self, request, view):
+#         return request.user.is_authenticated and request.user.role == 'investigador'
+
+# class IsGeneralUser(BasePermission):
+#     def has_permission(self, request, view):
+#         return request.user.is_authenticated and request.user.role == 'usuario'
+    
+# class IsCreator(BasePermission):
+#     """Allow access only to object creator or admin users."""
+#     def has_object_permission(self, request, view, obj):
+#         # SAFE_METHODS handled elsewhere if needed
+#         return (
+#             request.user.is_authenticated and
+#             (
+#                 obj.supervisor == request.user
+#             )
+#         )
+
+from rest_framework.permissions import BasePermission, SAFE_METHODS
+
+# class HasRole(BasePermission):
+#     """Permission checking if the authenticated user has one of the allowed roles."""
+#     def __init__(self, *allowed_roles):
+#         self.allowed_roles = allowed_roles
+
+#     def has_permission(self, request, view):
+#         return (
+#             request.user.is_authenticated and
+#             request.user.role in self.allowed_roles
+#         )
+
+# class IsCreator(BasePermission):
+#     """Only allow object creator to edit/destroy."""
+#     def has_permission(self, request, view):
+#         # Allow access to detail actions so has_object_permission runs
+#         return request.user.is_authenticated
+
+#     def has_object_permission(self, request, view, obj):
+#         # Allow read-only for everyone authenticated
+#         if request.method in SAFE_METHODS:
+#             return True
+#         # Only the supervisor who created it
+#         return obj.supervisor == request.user
+
+# class IsCreatorOrAdmin(BasePermission):
+#     """Allow access only to object creator or admin for object-level actions."""
+#     def has_permission(self, request, view):
+#         return request.user.is_authenticated
+
+#     def has_object_permission(self, request, view, obj):
+#         # Lectura solo por admin o creador
+#         if request.method in SAFE_METHODS:
+#             return (
+#                 request.user.role == 'admin'
+#                 or obj.supervisor == request.user
+#             )
+#         # Escritura/eliminación con las mismas reglas
+#         return (
+#             request.user.role == 'admin'
+#             or obj.supervisor == request.user
+#         )
+
+
+class HasRole(BasePermission):
+    """
+    Permite el acceso a usuarios autenticados cuyo rol esté en allowed_roles.
+    """
+    allowed_roles = ()
+
+    def has_permission(self, request, view):
+        return (
+            request.user.is_authenticated
+            and request.user.role in self.allowed_roles
+        )
+
+class IsAdminOrInvestigator(HasRole):
+    allowed_roles = ('admin', 'investigador')
+
+class IsCreatorOrAdmin(BasePermission):
+    """
+    Permite acceso solo a:
+     – El supervisor (creador) del objeto Study
+     – Usuarios con rol 'admin'
+    Tanto para lectura como para modificación o borrado.
+    """
+    def has_permission(self, request, view):
+        # Solo usuarios autenticados entran aquí; detalles se comprueban en has_object_permission
+        return request.user.is_authenticated
+
+    def has_object_permission(self, request, view, obj):
+        is_admin   = request.user.role == 'admin'
+        is_creator = obj.supervisor == request.user
+
+        # Lectura (GET, HEAD, OPTIONS): admin o creador
+        if request.method in SAFE_METHODS:
+            return is_admin or is_creator
+
+        # Escritura/Eliminación: mismo criterio
+        return is_admin or is_creator
+    
+class IsAdmin(BasePermission):
+    """
+      Solo usuarios con rol 'admin'.
+    """
+    def has_permission(self, request, view):
+        # Solo usuarios autenticados entran aquí; detalles se comprueban en has_object_permission
+        return request.user.is_authenticated and request.user.role == 'admin'
+
+class IsInvestigator(BasePermission):
+    """
+    Solo usuarios con rol 'investigador'.
+    """
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and request.user.role == 'investigador'

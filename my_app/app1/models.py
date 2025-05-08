@@ -1,5 +1,7 @@
 from django.db import models
 from django.utils import timezone
+
+from accounts.models import User
 # Create your models here.
 class Person(models.Model):
     GENDER_CHOICES = [
@@ -61,6 +63,12 @@ class Study(models.Model):
     country = models.CharField(max_length=100,blank=True, null=True)
     start_date = models.DateField()
     end_date = models.DateField(blank=True, null=True)
+    supervisor = models.ForeignKey(
+        User,
+        on_delete=models.DO_NOTHING,
+        related_name='studies',
+        help_text='Usuario que creó este estudio'
+    )
     # dimension = models.ManyToManyField(Dimension, through='StudyDimension')
     # supervisor = models.ForeignKey(Supervisor, on_delete=models.CASCADE)
     # anthropometric_table = models.OneToOneField(AnthropometricTable, on_delete=models.CASCADE, unique=True)

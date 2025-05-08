@@ -26,8 +26,6 @@ class PersonSerializer(serializers.ModelSerializer):
         model = Person
         fields = ['id', 'name', 'gender', 'date_of_birth', 'country', 'state', 'province', 'measurements']
     def create(self, validated_data):
-        print("hola")
-        print(validated_data)
         measurements_data = validated_data.pop('measurements')
         person = Person.objects.create(**validated_data)
 
@@ -122,16 +120,19 @@ class StudySerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Study
-        fields = ['name','size', 'id', 'description', 'location', 'country', 'start_date', 'end_date', 'dimensions','age_min','age_max','classification','gender']
+        fields = ['name','size', 'id', 'description', 'location', 'country', 'start_date', 'end_date', 'dimensions','age_min','age_max','classification','gender','supervisor']
+        read_only_fields = ['id', 'supervisor']
 
     def create(self, validated_data):
         # Extraer los datos de las dimensiones si están presentes
         dimensions_data = validated_data.pop('study_dimension', [])
-        print("Datos de dimensiones:", dimensions_data)  # Depuración
+        
+        # assign supervisor from context
+        user = self.context['request'].user
         
         # Crear el estudio
-        study = Study.objects.create(**validated_data)
-        
+        # study = Study.objects.create(**validated_data)
+        study = Study.objects.create(supervisor=user, **validated_data)
         # Crear las relaciones StudyDimension
         for dimension_data in dimensions_data:
             # Asegúrate de que 'id_dimension' esté presente en dimension_data
@@ -172,3 +173,48 @@ class StudySerializer(serializers.ModelSerializer):
                 print("Error: 'id_dimension' no está presente en dimension_data")
         
         return instance
+    
+    
+class PersonMeasurementSerializer(serializers.Serializer):
+    id = serializers.IntegerField(source='person.id')
+    name = serializers.CharField(source='person.name')
+    dimensions = serializers.SerializerMethodField()
+
+    def get_dimensions(self, obj):
+        # obj es un dict { 'person': <Person>, 'measurements': <QuerySet> }
+        measurements = obj['measurements']
+        # Convertimos a { dimension_name: value, ... }
+        return {
+            m.dimension.name: m.value
+            for m in measurements
+        }
+        
+class StudyDetailWithPersonsSerializer(serializers.ModelSerializer):
+    persons = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Study
+        # fields = [
+        #     'id', 'name', 'description', 'location', 'country',
+        #     'start_date', 'end_date', 'persons',
+        # ]
+        fields = [
+            'id', 'persons',
+        ]
+
+
+    def get_persons(self, study):
+        # Todas las mediciones de este estudio
+        qs = Measurement.objects.filter(study=study).select_related('person', 'dimension')
+        # Agrupamos por persona
+        by_person = {}
+        for m in qs:
+            by_person.setdefault(m.person, []).append(m)
+        # Construimos lista de dicts para el serializer
+        data = []
+        for person, measurements in by_person.items():
+            data.append({
+                'person': person,
+                'measurements': measurements
+            })
+        return PersonMeasurementSerializer(data, many=True).data

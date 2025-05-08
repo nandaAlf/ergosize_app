@@ -2,8 +2,8 @@ from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from app1.models import Person, Measurement, Study, Dimension, StudyDimension
-from app1.api.serializer import  PersonSerializer, MeasurementSerializer, StudyDimensionSerializer, StudySerializer, DimensionSerializer
-from django.http import HttpResponse, JsonResponse
+from app1.api.serializer import  PersonSerializer, MeasurementSerializer, StudyDimensionSerializer, StudySerializer, DimensionSerializer, StudyDetailWithPersonsSerializer
+from django.http import Http404, HttpResponse, JsonResponse
 from django.views import View
 from django.db import connection
 import numpy as np
@@ -21,13 +21,71 @@ from reportlab.lib import colors
 from openpyxl import load_workbook
 from django.views.decorators.csrf import csrf_exempt
 import io
-
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.permissions import IsAuthenticated
+from accounts.api.permissions import HasRole, IsAdmin, IsAdminOrInvestigator, IsCreatorOrAdmin, IsInvestigator
+# IsAdmin, IsCreator, IsGeneralUser, IsInvestigator
+from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 
 
 class PersonViewSet(viewsets.ModelViewSet):
+    authentication_classes = [JWTAuthentication]
     queryset = Person.objects.all()
     serializer_class = PersonSerializer
+   
+    # def get_permissions(self):
+    #     base = [IsAuthenticated()]
+    #     if self.action in ['list', 'retrieve']:
+    #         # Admin ve todo; investigador ve solo sus vinculados (que se filtran en get_queryset)
+    #         return [IsAdmin(), IsInvestigator()]
+    #     if self.action in ['create', 'update', 'partial_update', 'destroy']:
+    #         # Solo admin o investigador pueden gestionar personas/mediciones
+    #         return [IsAdmin(), IsInvestigator()]
+    #     return [IsAuthenticated()]
 
+    # def get_queryset(self):
+    #     user = self.request.user
+    #     qs = Person.objects.all()
+    #     if user.role == 'admin':
+    #         return qs
+    #     # Investigador: obtener solo persons con measurements en estudios supervisados por user
+    #     # Suponiendo Measurement tiene FK study with supervisor
+    #     return qs.filter(
+    #         measurements__study__supervisor=user
+    #     ).distinct()
+
+    # def perform_create(self, serializer):
+    #     """
+    #     Verifica que, para investigadores, todas las mediciones
+    #     referencian estudios que supervisa.
+    #     """
+    #     user = self.request.user
+    #     data = self.request.data.get('measurements', [])
+    #     if user.role == 'investigador':
+    #         # extraer todos los study IDs del payload
+    #         study_ids = {m.get('study') for m in data}
+    #         # comprobar supervisión
+    #         not_owned = Study.objects.filter(id__in=study_ids).exclude(supervisor=user)
+    #         if not_owned.exists():
+    #             raise PermissionDenied("No puedes añadir personas para estudios que no supervisas.")
+    #     serializer.save()
+
+    # def perform_update(self, serializer):
+    #     """
+    #     Igual que create: verifica que el investigador solo modifique
+    #     mediciones en sus propios estudios.
+    #     """
+    #     user = self.request.user
+    #     data = self.request.data.get('measurements', [])
+    #     if user.role == 'investigador':
+    #         study_ids = {m.get('study') for m in data}
+           
+    #         not_owned = Study.objects.filter(id__in=study_ids).exclude(supervisor=user)
+    #         if not_owned.exists():
+    #             raise PermissionDenied("No puedes modificar personas con mediciones de estudios que no supervisas.")
+    #     serializer.save() 
+   
 class DimensionViewSet(viewsets.ModelViewSet):
     queryset = Dimension.objects.all()
     serializer_class = DimensionSerializer
@@ -36,6 +94,11 @@ class MeasurementViewSet(viewsets.ModelViewSet):
     queryset = Measurement.objects.all()
     serializer_class = MeasurementSerializer
     # permission_classes = [IsAuthenticated]  # Solo usuarios autenticados pueden eliminar
+
+    def get_permissions(self):
+        # if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsCreatorOrAdmin()]
+        # return [IsAuthenticated()]
 
     def destroy(self, request, *args, **kwargs):
         # Obtener el study_id y person_id de la solicitud
@@ -70,14 +133,81 @@ class MeasurementViewSet(viewsets.ModelViewSet):
             {"message": "Mediciones eliminadas correctamente"},
             status=status.HTTP_204_NO_CONTENT,
         )
-
 class StudyViewSet(viewsets.ModelViewSet):
+    # queryset = Study.objects.all()
+    # serializer_class = StudySerializer
+    authentication_classes = [JWTAuthentication]
     queryset = Study.objects.all()
     serializer_class = StudySerializer
+    permission_classes = [IsAuthenticated]
 
+
+
+    def get_queryset(self):   
+        qs = super().get_queryset()
+        # Si se pasa ?mine=true, filtra por supervisor
+        if self.request.query_params.get('mine') == 'true':
+            return qs.filter(supervisor=self.request.user)
+        return qs
+    
+    # def get_permissions(self):
+    #     if self.action == 'create':
+    #         return [HasRole('admin', 'investigador')]
+    #     if self.action in ['update', 'partial_update']:
+    #         return [IsCreator()]
+    #     if self.action == 'destroy':
+    #         # allow admin or creator
+    #         return [HasRole('admin'), IsCreator()]
+    #     # list and retrieve
+    #     return [IsAuthenticated()]
+    
+    def get_permissions(self):
+        if   self.action == 'create':
+            # Solo admin e investigadores pueden crear
+            return [IsAdminOrInvestigator()]
+        elif self.action in ['update', 'partial_update', 'destroy']:
+            # Solo el creador (supervisor) o admin pueden modificar o eliminar
+            return [IsCreatorOrAdmin()]
+        elif self.action == 'members':
+            # Solo el creador o admin pueden ver las personas y sus mediciones
+            return [IsCreatorOrAdmin()]
+        # Listar y recuperar: cualquier usuario autenticado
+        return [IsAuthenticated()]
+    
+    @action(detail=True, methods=['get'], url_path='members')
+    def members(self, request, pk=None):
+        """
+        GET /api/studies/{pk}/members/
+        devuelve el estudio con la lista de personas y sus valores de medición.
+        """
+        study = self.get_object()
+        serializer = StudyDetailWithPersonsSerializer(study, context={'request': request})
+        return Response(serializer.data)
+    
+    # def get_permissions(self):
+    #     if self.action in ['create']:
+    #         # sólo admin e investigadores
+    #         permission_classes = [IsAdmin|IsInvestigator]
+    #     elif self.action in ['delete']:
+    #         permission_classes = [IsAdmin|IsCreator]
+    #     elif self.action in['update', 'partial_update'] :
+    #         permission_classes=[IsCreator]
+    #     else:
+    #         # listar y retrieve permitidos a todos autenticados
+    #         permission_classes = [IsAdmin|IsInvestigator|IsGeneralUser]
+    #     return [perm() for perm in permission_classes]
 class StudyDimensionViewSet(viewsets.ModelViewSet):
     queryset = StudyDimension.objects.all()
     serializer_class = StudyDimensionSerializer
+    
+    # def get_permissions(self):
+    #     if self.action in ['create', 'update', 'partial_update', 'destroy']:
+    #         # sólo admin e investigadores
+    #         permission_classes = [IsAdmin|IsInvestigator]
+    #     else:
+    #         # listar y retrieve permitidos a todos autenticados
+    #         permission_classes = [IsAdmin|IsInvestigator|IsGeneralUser]
+    #     return [perm() for perm in permission_classes]
 
 # class AnthropometricTableViewSet(viewsets.ModelViewSet):
     # queryset = AnthropometricTable.objects.all()
@@ -118,196 +248,325 @@ class StudyDimensionViewSet(viewsets.ModelViewSet):
 #     serializer_class = AnthropometricStatisticSerializer
 
 
-class StudyDataView(View):
-    """
-    Vista para obtener los datos de un estudio específico, incluyendo las personas
-    y sus mediciones en las dimensiones asociadas.
-    """
-    def get(self, request, study_id):
-        """
-        Maneja las solicitudes GET para obtener los datos del estudio.
+# class StudyDataView(View):
+#     """
+#     Vista para obtener los datos de un estudio específico, incluyendo las personas
+#     y sus mediciones en las dimensiones asociadas.
+#     """
+#     def get(self, request, study_id):
+#         """
+#         Maneja las solicitudes GET para obtener los datos del estudio.
         
-        Args:
-            request: La solicitud HTTP.
-            study_id: El ID del estudio.
+#         Args:
+#             request: La solicitud HTTP.
+#             study_id: El ID del estudio.
         
-        Returns:
-            JsonResponse: Un JSON con los datos del estudio.
-        """
-        # Verificar que el estudio existe
-        study = get_object_or_404(Study, id=study_id)
+#         Returns:
+#             JsonResponse: Un JSON con los datos del estudio.
+#         """
+#         # Verificar que el estudio existe
+#         study = get_object_or_404(Study, id=study_id)
 
-        # Obtener los datos del estudio
-        try:
-            data = self.get_study_data_json(study_id)
-            return JsonResponse(data, safe=False, status=200)
-        except Exception as e:
-            # Manejar errores en la consulta o procesamiento
-            return JsonResponse({"error": str(e)}, status=500)
+#         # Obtener los datos del estudio
+#         try:
+#             data = self.get_study_data_json(study_id)
+#             return JsonResponse(data, safe=False, status=200)
+#         except Exception as e:
+#             # Manejar errores en la consulta o procesamiento
+#             return JsonResponse({"error": str(e)}, status=500)
     
-    def get_study_dimensions(self, study_id):
-        """
-        Obtiene todas las dimensiones asociadas al estudio desde la tabla StudyDimension.
+#     def get_study_dimensions(self, study_id):
+#         """
+#         Obtiene todas las dimensiones asociadas al estudio desde la tabla StudyDimension.
         
-        Args:
-            study_id: El ID del estudio.
+#         Args:
+#             study_id: El ID del estudio.
         
-        Returns:
-            list: Una lista de nombres de dimensiones.
-        """
-        # dimensions = StudyDimension.objects.filter(id_study_id=study_id).values_list('id_dimension__name', flat=True)
-        # return list(dimensions)
-        dimensions = StudyDimension.objects.filter(id_study_id=study_id).values_list('id_dimension__name', 'id_dimension__id','id_dimension__initial')
-        return list(dimensions)
+#         Returns:
+#             list: Una lista de nombres de dimensiones.
+#         """
+#         # dimensions = StudyDimension.objects.filter(id_study_id=study_id).values_list('id_dimension__name', flat=True)
+#         # return list(dimensions)
+#         dimensions = StudyDimension.objects.filter(id_study_id=study_id).values_list('id_dimension__name', 'id_dimension__id','id_dimension__initial')
+#         return list(dimensions)
     
-    def get_study_data(self, study_id):
-        """
-        Obtiene los datos del estudio desde la base de datos.
+#     def get_study_data(self, study_id):
+#         """
+#         Obtiene los datos del estudio desde la base de datos.
         
-        Args:
-            study_id: El ID del estudio.
+#         Args:
+#             study_id: El ID del estudio.
         
-        Returns:
-            list: Una lista de tuplas con los datos de las personas y sus mediciones.
-        """
-        query = """
-        SELECT
-            p.id AS person_id,
-            p.name AS person_name,
-            d.name AS dimension_name,
-            m.value AS measurement_value
-        FROM
-            app1_person p
-        JOIN
-            app1_measurement m ON p.id = m.person_id
-        JOIN
-            app1_dimension d ON m.dimension_id = d.id
-        JOIN
-            app1_studyDimension sd ON d.id = sd.id_dimension_id
-        WHERE
-            m.study_id = %s
-        ORDER BY
-            p.id, d.name;
-        """
+#         Returns:
+#             list: Una lista de tuplas con los datos de las personas y sus mediciones.
+#         """
+#         query = """
+#         SELECT
+#             p.id AS person_id,
+#             p.name AS person_name,
+#             d.name AS dimension_name,
+#             m.value AS measurement_value
+#         FROM
+#             app1_person p
+#         JOIN
+#             app1_measurement m ON p.id = m.person_id
+#         JOIN
+#             app1_dimension d ON m.dimension_id = d.id
+#         JOIN
+#             app1_studyDimension sd ON d.id = sd.id_dimension_id
+#         WHERE
+#             m.study_id = %s
+#         ORDER BY
+#             p.id, d.name;
+#         """
         
-        with connection.cursor() as cursor:
-            cursor.execute(query, [study_id])
-            results = cursor.fetchall()
+#         with connection.cursor() as cursor:
+#             cursor.execute(query, [study_id])
+#             results = cursor.fetchall()
         
-        return results
+#         return results
 
-    def get_study_data_json(self, study_id):
-        """
-        Convierte los datos del estudio en un formato JSON.
+#     def get_study_data_json(self, study_id):
+#         """
+#         Convierte los datos del estudio en un formato JSON.
         
-        Args:
-            study_id: El ID del estudio.
+#         Args:
+#             study_id: El ID del estudio.
         
-        Returns:
-            dict: Un diccionario con los datos del estudio, incluyendo las dimensiones y las personas.
-        """
+#         Returns:
+#             dict: Un diccionario con los datos del estudio, incluyendo las dimensiones y las personas.
+#         """
     
-        # Obtener todas las dimensiones asociadas al estudio (nombre e ID)
-        dimensions = self.get_study_dimensions(study_id)
+#         # Obtener todas las dimensiones asociadas al estudio (nombre e ID)
+#         dimensions = self.get_study_dimensions(study_id)
         
-        # Obtener los datos de las personas y sus mediciones
-        results = self.get_study_data(study_id)
+#         # Obtener los datos de las personas y sus mediciones
+#         results = self.get_study_data(study_id)
         
-        # Crear un diccionario para agrupar los datos por persona
-        data = {}
-        for row in results:
-            person_id, person_name, dimension_name, measurement_value = row
+#         # Crear un diccionario para agrupar los datos por persona
+#         data = {}
+#         for row in results:
+#             person_id, person_name, dimension_name, measurement_value = row
             
-            if person_id not in data:
-                data[person_id] = {
-                    "id": person_id,
-                    "name": person_name,
-                    "dimensions": {dimension[0]: None for dimension in dimensions}  # Inicializar todas las dimensiones con valor None
-                }
+#             if person_id not in data:
+#                 data[person_id] = {
+#                     "id": person_id,
+#                     "name": person_name,
+#                     "dimensions": {dimension[0]: None for dimension in dimensions}  # Inicializar todas las dimensiones con valor None
+#                 }
             
-            # Actualizar el valor de la medición para la dimensión correspondiente
-            data[person_id]["dimensions"][dimension_name] = measurement_value
-        # Convertir el diccionario a un formato JSON
-        return {
-            "dimensions": [{"name": dimension[0], "id": dimension[1],"initial":dimension[2]} for dimension in dimensions],  # Lista de todas las dimensiones con nombre e ID
-            "persons": list(data.values())  # Lista de personas con sus mediciones
-        }
+#             # Actualizar el valor de la medición para la dimensión correspondiente
+#             data[person_id]["dimensions"][dimension_name] = measurement_value
+#         # Convertir el diccionario a un formato JSON
+#         return {
+#             "dimensions": [{"name": dimension[0], "id": dimension[1],"initial":dimension[2]} for dimension in dimensions],  # Lista de todas las dimensiones con nombre e ID
+#             "persons": list(data.values())  # Lista de personas con sus mediciones
+#         }
         
 #MOVER A UTILS
-def calculate_percentiles_for_study(study_id, gender=None, age_min=None, age_max=None, dimensions_filter=None, percentiles_list=None):
-        # Obtener el estudio
-        study = Study.objects.get(id=study_id)
+# def calculate_percentiles_for_study(study_id, gender=None, age_min=None, age_max=None, dimensions_filter=None, percentiles_list=None):
+#         # Obtener el estudio
+#         study = Study.objects.get(id=study_id)
     
-        # Si no se indica percentiles, se usan los siguientes valores por defecto.
-        if percentiles_list is None:
-            percentiles_list = [5, 10, 25, 50, 75, 90, 95]
+#         # Si no se indica percentiles, se usan los siguientes valores por defecto.
+#         if percentiles_list is None:
+#             percentiles_list = [5, 10, 25, 50, 75, 90, 95]
 
-
-        # Crear o obtener la tabla antropométrica asociada al estudio
-        # table, created = AnthropometricTable.objects.get_or_create(study=study)
+#         dimensions_qs = Dimension.objects.filter(dimension_study__id_study=study)
+#         # print(dimensions_qs)
+#         if dimensions_filter:
+#             dimensions_qs = dimensions_qs.filter(id__in=dimensions_filter)
+#         print(dimensions_filter)
+      
+#         results = []  # Lista para almacenar los resultados
         
-        # Obtener todas las dimensiones asociadas al estudio
-        # Se filtran por 'dimensions_filter' si éste es proporcionado (se espera una lista de nombres).
-        dimensions_qs = Dimension.objects.filter(dimension_study__id_study=study)
-        # print(dimensions_qs)
-        if dimensions_filter:
-            dimensions_qs = dimensions_qs.filter(id__in=dimensions_filter)
-        print(dimensions_filter)
-        # dimensions = Dimension.objects.filter(dimension_study__id_study=study)
-        # Obtener todas las dimensiones asociadas al estudio
+#         for dimension in dimensions_qs:
+#             # Obtener todas las mediciones para esta dimensión en el estudio
+#             measurements = Measurement.objects.filter(study=study, dimension=dimension)
+#             filtered_values = []
+#             # Procesar cada medición para aplicar filtros adicionales sobre la persona asociada
+#             for measurement in measurements:
+#                 person = measurement.person
+#                 # print(person or "kkk")
 
-    
-        # print(dimensions.id_dimension or "n")
-        results = []  # Lista para almacenar los resultados
-        
-        for dimension in dimensions_qs:
-            # Obtener todas las mediciones para esta dimensión en el estudio
-            measurements = Measurement.objects.filter(study=study, dimension=dimension)
-            filtered_values = []
-            # Procesar cada medición para aplicar filtros adicionales sobre la persona asociada
-            for measurement in measurements:
-                person = measurement.person
-                # print(person or "kkk")
+#                 # Filtrar por género si se indicó
+#                 if gender and person.gender != gender:
+#                     continue
 
-                # Filtrar por género si se indicó
-                if gender and person.gender != gender:
-                    continue
-
-                # Filtrar por rango de edad (calculado a partir de date_of_birth)
-                if (age_min or age_max) and person.date_of_birth  and measurement.date:
-                    measurement_date = measurement.date.date() 
-                    birth_date = person.date_of_birth
+#                 # Filtrar por rango de edad (calculado a partir de date_of_birth)
+#                 if (age_min or age_max) and person.date_of_birth  and measurement.date:
+#                     measurement_date = measurement.date.date() 
+#                     birth_date = person.date_of_birth
                 
-                    age = measurement_date.year - birth_date.year - (
-                        (measurement_date.month, measurement_date.day) < (birth_date.month, birth_date.day)
-                    )
-                    if age_min and age < age_min:
-                        continue
-                    if age_max and age > age_max:
-                        continue
+#                     age = measurement_date.year - birth_date.year - (
+#                         (measurement_date.month, measurement_date.day) < (birth_date.month, birth_date.day)
+#                     )
+#                     if age_min and age < age_min:
+#                         continue
+#                     if age_max and age > age_max:
+#                         continue
             
-                filtered_values.append(measurement.value)
+#                 filtered_values.append(measurement.value)
              
-            if filtered_values:
-                mean = float(np.mean(filtered_values))
-                sd = float(np.std(filtered_values))
-                # Calcular los percentiles según la lista especificada
-                percentiles = np.percentile(filtered_values, percentiles_list)
-                # Convertir el resultado a un diccionario con claves como strings
-                percentiles_dict = {str(p): float(val) for p, val in zip(percentiles_list, percentiles)}
+#             if filtered_values:
+#                 mean = float(np.mean(filtered_values))
+#                 sd = float(np.std(filtered_values))
+#                 # Calcular los percentiles según la lista especificada
+#                 percentiles = np.percentile(filtered_values, percentiles_list)
+#                 # Convertir el resultado a un diccionario con claves como strings
+#                 percentiles_dict = {str(p): float(val) for p, val in zip(percentiles_list, percentiles)}
 
-                results.append({
-                    'dimension': dimension.name,
-                    'dimension_id': dimension.id,	
-                    'mean': mean,
-                    'sd': sd,
-                    'percentiles': percentiles_dict
-                })
+#                 results.append({
+#                     'dimension': dimension.name,
+#                     'dimension_id': dimension.id,	
+#                     'mean': mean,
+#                     'sd': sd,
+#                     'percentiles': percentiles_dict
+#                 })
         
-        return results
+#         return results
+
+
+def calculate_percentiles_for_study(
+    study_id,
+    gender=None,         # 'M', 'F', or 'mixto'
+    age_min=None,
+    age_max=None,
+    dimensions_filter=None,
+    percentiles_list=None
+):
+    # Obtener el estudio o lanzar error
+    try:
+        study = Study.objects.get(id=study_id)
+    except Study.DoesNotExist:
+        raise Http404(f"Study with id {study_id} not found")
+
+    # Percentiles por defecto
+    percentiles = percentiles_list or [5, 10, 25, 50, 75, 90, 95]
+
+    # Preparar dimensiones
+    dims = Dimension.objects.filter(dimension_study__id_study=study)
+    if dimensions_filter:
+        dims = dims.filter(id__in=dimensions_filter)
+
+    results = []
+    genders_to_process = ['M', 'F'] if gender == 'mixto' else ([gender] if gender in ('M', 'F') else [None])
+
+    for dim in dims:
+        stats_block = {}
+        for g in genders_to_process:
+            values = _collect_measurements(study, dim, g, age_min, age_max)
+            if values:
+                stats_block[g or 'all'] = _compute_stats(values, percentiles)
+
+        if stats_block:
+            entry = {
+                'dimension': dim.name,
+                'dimension_id': dim.id,
+            }
+            if gender == 'mixto':
+                entry['by_gender'] = {g: stats_block.get(g) for g in ['M', 'F'] if stats_block.get(g)}
+            else:
+                key = 'stats' if gender in ('M', 'F') else 'stats'
+                entry[key] = stats_block.get(gender) or stats_block.get('all')
+            results.append(entry)
+
+    return results
+
+
+def _collect_measurements(study, dimension, gender_filter, age_min, age_max):
+    """
+    Devuelve lista de valores filtrados según género (M/F/None) y rango de edad.
+    """
+    qs = Measurement.objects.filter(
+        study=study,
+        dimension=dimension
+    ).select_related('person')
+    vals = []
+    for m in qs:
+        p = m.person
+        # Filtrar por género
+        if gender_filter and p.gender != gender_filter:
+            continue
+        
+        # Filtrar por edad
+        if (age_min or age_max) and p.date_of_birth and m.date:
+            md = m.date.date()
+            bd = p.date_of_birth
+            age = md.year - bd.year - ((md.month, md.day) < (bd.month, bd.day))
+            if age_min and age < age_min:
+                continue
+            if age_max and age > age_max:
+                continue
+        vals.append(m.value)
+    return vals
+
+
+def _compute_stats(values, percentiles_list):
+    """
+    Calcula media, desviación estándar y percentiles de una lista de valores.
+    """
+    arr = np.array(values, dtype=float)
+    mean = float(arr.mean())
+    sd = float(arr.std())
+    perc_vals = np.percentile(arr, percentiles_list)
+    perc_dict = {str(int(p)): float(v) for p, v in zip(percentiles_list, perc_vals)}
+    return {
+        'mean': mean,
+        'sd': sd,
+        'percentiles': perc_dict
+    }
+
+
 
 class Perceptil(View):
+    """Vista para obtener percentiles de un estudio."""
     def get(self, request,study_id):
+        if not study_id:
+            return JsonResponse( {"status": "error", "message": "El parámetro 'study_id' es requerido."},    status=400)
+        
+        # Parámetros GET
+        gender=request.GET.get('gender')
+        age_min=request.GET.get('age_min')
+        age_max=request.GET.get('age_max')
+        dimensions = request.GET.get('dimensions')
+        percentiles_param = request.GET.get('percentiles')
+        
+        #Validar y convertir parametros
+        if gender and gender not in ('M','F','mixto'):
+            return JsonResponse({'status':'error','message':'Valor gender invalido'}, status=400)
+       
+        try:
+            age_min=int(age_min) if age_min else None
+            age_max=int(age_max) if age_max else None
+        except ValueError:
+            return JsonResponse({'status':'error','message':'Valor de age_min y age_max invalido'}, status=400)
+       
+       
+        dims_filter = [int(d) for d in dimensions.split(',')] if dimensions else None
+
+        try:
+            perc_list = [float(p) for p in percentiles_param.split(',')] if percentiles_param else None
+        except ValueError:
+            return JsonResponse({'status': 'error', 'message': "'percentiles' debe ser lista de números."}, status=400)
+
+        try:
+            results = calculate_percentiles_for_study(
+                study_id,
+                gender=gender,
+                age_min=age_min,
+                age_max=age_max,
+                dimensions_filter=dims_filter,
+                percentiles_list=perc_list
+            )
+            return JsonResponse({'status': 'success', 'study_id': study_id, 'results': results})
+
+        except Http404 as e:
+            return JsonResponse({'status': 'error', 'message': str(e)}, status=404)
+        except Exception as e:
+            return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+       
         # Obtener el ID del estudio desde los parámetros de la solicitud GET
         # study_id = request.GET.get('study_id')
         if not study_id:
@@ -318,8 +577,9 @@ class Perceptil(View):
         # Extracción de parámetros vía GET:
         #   gender: "M" o "F"
         gender = request.GET.get('gender', None)
-        if gender and gender not in ['M', 'F']:
-            return JsonResponse({"status": "error", "message": "Valor de género inválido. Use 'M' o 'F'."}, status=400)
+    
+        # if gender and gender not in ['M', 'F']:
+        #     return JsonResponse({"status": "error", "message": "Valor de género inválido. Use 'M' o 'F'."}, status=400)
 
         #   age_min y age_max: se convierten a entero si están proporcionados
         age_min = request.GET.get('age_min', None)
@@ -633,12 +893,20 @@ def generar_pdf_ficha(request):
     print(study)
 
     # 2) Formatear datos básicos
+    # datos = {
+    #     "nombre": person.name,
+    #     "sexo":   dict(Person.GENDER_CHOICES).get(person.gender, person.gender),
+    #     "pais":   person.country,
+    #     "estado": person.state,
+    #     "fecha_nacimiento": if  person.date_of_birth:  person.date_of_birth.strftime("%Y/%m/%d") ,
+    # }
+
     datos = {
-        "nombre": person.name,
-        "sexo":   dict(Person.GENDER_CHOICES).get(person.gender, person.gender),
-        "pais":   person.country,
-        "estado": person.state,
-        "fecha_nacimiento": person.date_of_birth.strftime("%Y/%m/%d"),
+        "nombre": person.name if person.name else "",  # o '' si prefieres string vacío
+        "sexo": dict(Person.GENDER_CHOICES).get(person.gender, person.gender) if person.gender else "",
+        "pais": person.country if person.country else "",
+        "estado": person.state if person.state else "",
+        "fecha_nacimiento": person.date_of_birth.strftime("%Y/%m/%d") if person.date_of_birth else ""
     }
 
     # 3) Traer todas las mediciones de este estudio y persona
@@ -749,135 +1017,3 @@ def generar_pdf_ficha(request):
         headers={'Content-Disposition': f'attachment; filename="ficha_{person.name}.pdf"'}
     )
 
-    # study = Study.objects.get(id=study_id)
-    # person = Person.objects.get(id=person_id)
-    # datos = {
-    #     "nombre": "Fernanda Alfonso",
-    #     "sexo": "Femenino",
-    #     "pais": "Cuba",
-    #     "estado": "UCLV",
-    #     "fecha_nacimiento": "2000/01/01",
-
-    #     "medidas_erecto": [
-    #         {"nombre": "Altura", "valor": 160},
-    #         {"nombre": "Distancia entre ojos", "valor": 20},
-    #         {"nombre": "Altura", "valor": 160},
-    #         {"nombre": "Distancia entre ojos", "valor": 20}
-    #     ],
-    #     "medidas_sentado": [
-    #         {"nombre": "Circunferencia de la cadera", "valor": 60},
-    #         {"nombre": "Distancia entre ojos", "valor": 4}
-    #     ],
-    #     "control": {
-    #         "fecha": "2025/04/30",
-    #         "inicio": "2020/01/02",
-    #         "fin": "2023/03/03",
-    #         "responsable": "Pedro Suarez",
-    #         "supervisor": "Roberto Carlos",
-    #         "dimensiones": "en mm",
-    #         "peso": "50"
-    #     }
-    # }
-
-    # buffer = io.BytesIO()
-    # doc = SimpleDocTemplate(buffer, pagesize=A4)
-    # styles = getSampleStyleSheet()
-    # styleN = styles["Normal"]
-    # styleB = styles["Heading4"]
-
-    # contenido = []
-
-    # def p(texto, estilo=styleN):
-    #     return Paragraph(texto, estilo)
-
-    # # Construimos todas las filas de una sola tabla
-    # tabla = []
-
-    # # Título principal (fila combinada)
-    # # tabla.append([p("<b>Ficha de recoleción de datos </b>", styleB), '', ''])
-    # tabla.append([p("<b>Ficha de recoleccion de datos antropométricos</b>"), '', ''])
-
-    # # Fila: nombre y sexo
-    # tabla.append([
-    #     p("Nombre: {}".format(datos["nombre"])),
-    #     p("Sexo: {}".format(datos["sexo"])),
-    #     ''
-    # ])
-
-    # # Fila: país, estado, fecha de nacimiento
-    # tabla.append([
-    #     p("País: {}".format(datos["pais"])),
-    #     p("Estado: {}".format(datos["estado"])),
-    #     p("Fecha de nacimiento: {}".format(datos["fecha_nacimiento"]))
-    # ])
-
-    # # Subtítulo: Medidas en posición erecto
-    # tabla.append([p("<b>Medidas en posición erecto</b>"), '', ''])
-
-    # # Encabezado tabla erecto
-    # tabla.append([p("<b>No</b>"), p("<b>Nombre</b>"), p("<b>Valor (mm)</b>")])
-
-    # # Datos erecto
-    # for i, m in enumerate(datos["medidas_erecto"], start=1):
-    #     tabla.append([str(i), m["nombre"], str(m["valor"])])
-
-    # # Subtítulo: Medidas en posición sentado
-    # tabla.append([p("<b>Medidas en posición sentado</b>"), '', ''])
-
-    # # Encabezado tabla sentado
-    # tabla.append([p("<b>No</b>"), p("<b>Nombre</b>"), p("<b>Valor (mm)</b>")])
-
-    # for i, m in enumerate(datos["medidas_sentado"], start=1):
-    #     tabla.append([str(i), m["nombre"], str(m["valor"])])
-
-    # # Subtítulo: Control
-    # tabla.append([p("<b>Control</b>"), '', ''])
-
-    # # Fila: fecha, inicio, fin
-    # tabla.append([
-    #     p("Fecha: {}".format(datos["control"]["fecha"])),
-    #     p("Inicio: {}".format(datos["control"]["inicio"])),
-    #     p("Fin: {}".format(datos["control"]["fin"]))
-    # ])
-
-    # # Fila: responsable, supervisor
-    # tabla.append([
-    #     p("Responsable: {}".format(datos["control"]["responsable"])),
-    #     p("Supervisor: {}".format(datos["control"]["supervisor"])),
-    #     ''
-    # ])
-
-    # # Fila: dimensiones y peso
-    # tabla.append([
-    #     p("Dimensiones: {}".format(datos["control"]["dimensiones"])),
-    #     p("Peso: {} kg".format(datos["control"]["peso"])),
-    #     ''
-    # ])
-
-    # # Definir tabla como una sola gran tabla con columnas
-    # t = Table(tabla, colWidths=[180, 180, 180])
-
-    # # Estilo de la tabla
-    # estilo = TableStyle([
-    #     ('GRID', (0, 0), (-1, -1), 0.8, colors.black),
-    #     ('SPAN', (0, 0), (-1, 0)),  # Título
-    #     ('SPAN', (0, 3), (-1, 3)),  # Subtítulo erecto
-    #     ('SPAN', (0, 5 + len(datos["medidas_erecto"])), (-1, 5 + len(datos["medidas_erecto"]))),  # Subtítulo sentado
-    #     ('SPAN', (0, 7 + len(datos["medidas_erecto"]) + len(datos["medidas_sentado"])), (-1, 7 + len(datos["medidas_erecto"]) + len(datos["medidas_sentado"]))),  # Subtítulo control
-    #     # ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),  # título
-    #     # ('BACKGROUND', (0, 3), (-1, 3), colors.lightgrey),
-    #     # ('BACKGROUND', (0, 6 + len(datos["medidas_erecto"])), (-1, 6 + len(datos["medidas_erecto"])), colors.lightgrey),
-    #     # ('BACKGROUND', (0, 9 + len(datos["medidas_erecto"]) + len(datos["medidas_sentado"])), (-1, 9 + len(datos["medidas_erecto"]) + len(datos["medidas_sentado"])), colors.lightgrey),
-    #     ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-    #     ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-    # ])
-
-    # t.setStyle(estilo)
-
-    # contenido.append(t)
-    # doc.build(contenido)
-
-    # buffer.seek(0)
-    # return HttpResponse(buffer, content_type='application/pdf', headers={
-    #     'Content-Disposition': f'attachment; filename="ficha_{datos["nombre"]}.pdf"'
-    # })
