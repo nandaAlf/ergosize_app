@@ -119,3 +119,29 @@ class IsInvestigator(BasePermission):
     """
     def has_permission(self, request, view):
         return request.user.is_authenticated and request.user.role == 'investigador'
+
+class IsInvestigatorOfPerson(BasePermission):
+    """
+    Autorización objeto:
+    Permite ver/editar/crear/eliminar una Person únicamente si:
+     - El usuario es administrador, o
+     - El usuario es investigador y supervisa al menos un estudio en el que
+       esa persona tiene mediciones.
+    """
+    def has_permission(self, request, view):
+        # Abrimos la vista solo a admin o investigadores
+        return (
+            request.user.is_authenticated and 
+            request.user.role in ('admin','investigador')
+        )
+
+    def has_object_permission(self, request, view, person):
+        # Admin puede siempre
+        if request.user.role == 'admin':
+            return True
+
+        # Para investigador, comprobamos que exista al menos
+        # una medición de esta persona en un estudio que él supervisa.
+        return person.measurements.filter(
+            study__supervisor=request.user
+        ).exists()

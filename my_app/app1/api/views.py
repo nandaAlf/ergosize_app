@@ -23,7 +23,7 @@ from django.views.decorators.csrf import csrf_exempt
 import io
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
-from accounts.api.permissions import HasRole, IsAdmin, IsAdminOrInvestigator, IsCreatorOrAdmin, IsInvestigator
+from accounts.api.permissions import HasRole, IsAdmin, IsAdminOrInvestigator, IsCreatorOrAdmin, IsInvestigator, IsInvestigatorOfPerson
 # IsAdmin, IsCreator, IsGeneralUser, IsInvestigator
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -33,6 +33,58 @@ class PersonViewSet(viewsets.ModelViewSet):
     authentication_classes = [JWTAuthentication]
     queryset = Person.objects.all()
     serializer_class = PersonSerializer
+   
+   
+    def get_permissions(self):
+        # list & retrieve
+        if self.action in ['list', 'retrieve']:
+            # admin ve todo, investigador también pasa permiso pero
+            # el queryset limita, y detail pasa a has_object_permission
+            return [IsAuthenticated(),  IsInvestigatorOfPerson()]
+        # create
+        if self.action == 'create':
+            return [IsAuthenticated(), IsInvestigator()]
+        # update / partial_update / destroy
+        if self.action in ['update','partial_update','destroy']:
+            return [IsAuthenticated(), IsInvestigatorOfPerson()]
+        # fallback: bloqueo
+        return [IsAuthenticated(),IsInvestigatorOfPerson()]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = Person.objects.all()
+        if user.role == 'admin':
+            return qs
+        if user.role == 'investigador':
+            # solo personas con mediciones en estudios supervisados
+            return qs.filter(
+                measurements__study__supervisor=user
+            ).distinct()
+        # usuarios generales no tienen acceso
+        return Person.objects.none()
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        measurements = self.request.data.get('measurements', [])
+        print("Mes",measurements)
+        
+        if user.role == 'investigador':
+            print("ES inv")
+            # Extraer todos los IDs de estudio del payload
+            study_ids = [m.get('study_id') for m in measurements]
+            print("Study id",study_ids)
+            # from studies.models import Study
+            # Detectar estudios que NO supervisa
+            unauthorized = Study.objects.filter(
+                id__in=study_ids
+            ).exclude(supervisor=user)
+            if unauthorized.exists():
+                raise PermissionDenied(
+                    "No puedes crear personas con mediciones de estudios que no supervisas."
+                )
+        # Si es admin, o investigador validado, guardamos todo
+        serializer.save()
+   
    
     # def get_permissions(self):
     #     base = [IsAuthenticated()]
@@ -95,10 +147,10 @@ class MeasurementViewSet(viewsets.ModelViewSet):
     serializer_class = MeasurementSerializer
     # permission_classes = [IsAuthenticated]  # Solo usuarios autenticados pueden eliminar
 
-    def get_permissions(self):
-        # if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsCreatorOrAdmin()]
-        # return [IsAuthenticated()]
+    # def get_permissions(self):
+    #     # if self.action in ['create', 'update', 'partial_update', 'destroy']:
+    #         return [IsCreatorOrAdmin()]
+    #     # return [IsAuthenticated()]
 
     def destroy(self, request, *args, **kwargs):
         # Obtener el study_id y person_id de la solicitud
