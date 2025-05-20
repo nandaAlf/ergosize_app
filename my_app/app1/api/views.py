@@ -37,16 +37,16 @@ class PersonViewSet(viewsets.ModelViewSet):
    
     def get_permissions(self):
         # list & retrieve
-        if self.action in ['list', 'retrieve']:
-            # admin ve todo, investigador también pasa permiso pero
-            # el queryset limita, y detail pasa a has_object_permission
+        if self.action in ['list', 'retrieve','update','partial_update','destroy']:
+        #     # admin ve todo, investigador también pasa permiso pero
+        #     # el queryset limita, y detail pasa a has_object_permission
             return [IsAuthenticated(),  IsInvestigatorOfPerson()]
         # create
         if self.action == 'create':
-            return [IsAuthenticated(), IsInvestigator()]
+            return [IsAuthenticated(), IsAdminOrInvestigator()]
         # update / partial_update / destroy
-        if self.action in ['update','partial_update','destroy']:
-            return [IsAuthenticated(), IsInvestigatorOfPerson()]
+        # if self.action in ['update','partial_update','destroy']:
+        #     return [IsAuthenticated(), IsInvestigatorOfPerson()]
         # fallback: bloqueo
         return [IsAuthenticated(),IsInvestigatorOfPerson()]
 
@@ -64,26 +64,52 @@ class PersonViewSet(viewsets.ModelViewSet):
         return Person.objects.none()
 
     def perform_create(self, serializer):
+    
         user = self.request.user
         measurements = self.request.data.get('measurements', [])
-        print("Mes",measurements)
-        
-        if user.role == 'investigador':
-            print("ES inv")
-            # Extraer todos los IDs de estudio del payload
-            study_ids = [m.get('study_id') for m in measurements]
-            print("Study id",study_ids)
-            # from studies.models import Study
-            # Detectar estudios que NO supervisa
+        roles=['investigador','admin']
+        if user.role in roles:
+            if not measurements:
+                raise PermissionDenied("Debes proporcionar al menos una medición.")
+
+            # Extraer los IDs de estudios desde las mediciones
+            study_ids = []
+            for m in measurements:
+                study_id = m.get('study_id')
+                if not study_id:
+                    raise PermissionDenied("Cada medición debe incluir un study_id.")
+                study_ids.append(study_id)
+
+            # Verificar que el usuario supervisa todos los estudios
             unauthorized = Study.objects.filter(
                 id__in=study_ids
             ).exclude(supervisor=user)
+
             if unauthorized.exists():
-                raise PermissionDenied(
-                    "No puedes crear personas con mediciones de estudios que no supervisas."
-                )
-        # Si es admin, o investigador validado, guardamos todo
+                raise PermissionDenied("No puedes crear personas con mediciones de estudios que no supervisas.")
+
         serializer.save()
+    # def perform_create(self, serializer):
+    #     user = self.request.user
+    #     measurements = self.request.data.get('measurements', [])
+    #     print("Mes",measurements)
+        
+    #     if user.role == 'investigador':
+    #         print("ES inv")
+    #         # Extraer todos los IDs de estudio del payload
+    #         study_ids = [m.get('study_id') for m in measurements]
+    #         print("Study id",study_ids)
+    #         # from studies.models import Study
+    #         # Detectar estudios que NO supervisa
+    #         unauthorized = Study.objects.filter(
+    #             id__in=study_ids
+    #         ).exclude(supervisor=user)
+    #         if unauthorized.exists():
+    #             raise PermissionDenied(
+    #                 "No puedes crear personas con mediciones de estudios que no supervisas."
+    #             )
+    #     # Si es admin, o investigador validado, guardamos todo
+    #     serializer.save()
    
    
     # def get_permissions(self):
@@ -139,52 +165,117 @@ class PersonViewSet(viewsets.ModelViewSet):
     #     serializer.save() 
    
 class DimensionViewSet(viewsets.ModelViewSet):
+    authentication_classes = [JWTAuthentication]
     queryset = Dimension.objects.all()
     serializer_class = DimensionSerializer
 
 class MeasurementViewSet(viewsets.ModelViewSet):
     queryset = Measurement.objects.all()
+    authentication_classes = [JWTAuthentication]
     serializer_class = MeasurementSerializer
     # permission_classes = [IsAuthenticated]  # Solo usuarios autenticados pueden eliminar
 
     # def get_permissions(self):
-    #     # if self.action in ['create', 'update', 'partial_update', 'destroy']:
+    #     if self.action in ['create', 'update', 'partial_update', 'destroy']:
     #         return [IsCreatorOrAdmin()]
-    #     # return [IsAuthenticated()]
+    #     return [IsAuthenticated()]
+    
+    def get_permissions(self):
+        # Para destruir mediciones en bloque, comprobamos permiso sobre el estudio
+        if self.action == 'destroy':
+            return [IsAuthenticated(), IsCreatorOrAdmin()]
+        # Resto de acciones: cualquier usuario autenticado
+        return [IsAuthenticated()]
 
     def destroy(self, request, *args, **kwargs):
-        # Obtener el study_id y person_id de la solicitud
+        """
+        DELETE /api/measurements/study_id/?&person_id=Y
+        Borra todas las mediciones de esa persona en ese estudio,
+        y si la persona no tiene más mediciones en otros estudios,
+        elimina también el registro de Person.
+        """
+        # study_id  = request.query_params.get('study_id')
         study_id=self.kwargs.get('pk')
-        person_id = request.data.get('person_id')
+        person_id = request.query_params.get('person_id')
 
         if not study_id or not person_id:
             return Response(
-                {"error": "Se requieren study_id y person_id"},
-                status=status.HTTP_400_BAD_REQUEST,
+                {"error": "Se requieren 'study_id' y 'person_id' como query params."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
-        # # Verificar permisos adicionales si es necesario
-        # if not request.user.has_perm('app.delete_measurement'):
-        #     return Response(
-        #         {"error": "No tienes permisos para eliminar estas mediciones"},
-        #         status=status.HTTP_403_FORBIDDEN,
-        #     )
-
-        # Verificar si existen mediciones para el estudio y persona especificados
-        if not Measurement.objects.filter(study_id=study_id, person_id=person_id).exists():
+        # Verificar permiso: simulamos un objeto Study para IsCreatorOrAdmin
+        # from studies.models import Study
+        try:
+            study = Study.objects.get(id=study_id)
+        except Study.DoesNotExist:
             return Response(
-                {"error": "No se encontraron mediciones para el estudio y persona especificados"},
-                status=status.HTTP_404_NOT_FOUND,
+                {"error": "Estudio no encontrado."},
+                status=status.HTTP_404_NOT_FOUND
             )
-        # Eliminar todos los registros de Measurement que coincidan
-        Measurement.objects.filter(study_id=study_id, person_id=person_id).delete()
 
-        # Puedes usar señales (signals) de Django para ejecutar acciones adicionales antes o después de la eliminación.
+        # Chequear permiso de objeto
+        self.check_object_permissions(request, study)
+
+        # Borrar mediciones en ese estudio
+        deleted_count, _ = Measurement.objects.filter(
+            study_id=study_id,
+            person_id=person_id
+        ).delete()
+
+        if deleted_count == 0:
+            return Response(
+                {"error": "No se encontraron mediciones para ese estudio y persona."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Si la persona ya no tiene mediciones en ningún estudio, borrarla
+        remaining = Measurement.objects.filter(person_id=person_id).exists()
+        if not remaining:
+            try:
+                person = Person.objects.get(id=person_id)
+                person.delete()
+            except Person.DoesNotExist:
+                pass  # ya puede no existir
 
         return Response(
-            {"message": "Mediciones eliminadas correctamente"},
-            status=status.HTTP_204_NO_CONTENT,
+            {"message": "Mediciones eliminadas correctamente."},
+            status=status.HTTP_204_NO_CONTENT
         )
+    
+    # def destroy(self, request, *args, **kwargs):
+    #     # Obtener el study_id y person_id de la solicitud
+    #     study_id=self.kwargs.get('pk')
+    #     person_id = request.data.get('person_id')
+
+    #     if not study_id or not person_id:
+    #         return Response(
+    #             {"error": "Se requieren study_id y person_id"},
+    #             status=status.HTTP_400_BAD_REQUEST,
+    #         )
+
+    #     # # Verificar permisos adicionales si es necesario
+    #     # if not request.user.has_perm('app.delete_measurement'):
+    #     #     return Response(
+    #     #         {"error": "No tienes permisos para eliminar estas mediciones"},
+    #     #         status=status.HTTP_403_FORBIDDEN,
+    #     #     )
+
+    #     # Verificar si existen mediciones para el estudio y persona especificados
+    #     if not Measurement.objects.filter(study_id=study_id, person_id=person_id).exists():
+    #         return Response(
+    #             {"error": "No se encontraron mediciones para el estudio y persona especificados"},
+    #             status=status.HTTP_404_NOT_FOUND,
+    #         )
+    #     # Eliminar todos los registros de Measurement que coincidan
+    #     Measurement.objects.filter(study_id=study_id, person_id=person_id).delete()
+
+    #     # Puedes usar señales (signals) de Django para ejecutar acciones adicionales antes o después de la eliminación.
+
+    #     return Response(
+    #         {"message": "Mediciones eliminadas correctamente"},
+    #         status=status.HTTP_204_NO_CONTENT,
+    #     )
 class StudyViewSet(viewsets.ModelViewSet):
     # queryset = Study.objects.all()
     # serializer_class = StudySerializer
@@ -192,7 +283,7 @@ class StudyViewSet(viewsets.ModelViewSet):
     queryset = Study.objects.all()
     serializer_class = StudySerializer
     permission_classes = [IsAuthenticated]
-
+    
 
 
     def get_queryset(self):   
@@ -201,17 +292,6 @@ class StudyViewSet(viewsets.ModelViewSet):
         if self.request.query_params.get('mine') == 'true':
             return qs.filter(supervisor=self.request.user)
         return qs
-    
-    # def get_permissions(self):
-    #     if self.action == 'create':
-    #         return [HasRole('admin', 'investigador')]
-    #     if self.action in ['update', 'partial_update']:
-    #         return [IsCreator()]
-    #     if self.action == 'destroy':
-    #         # allow admin or creator
-    #         return [HasRole('admin'), IsCreator()]
-    #     # list and retrieve
-    #     return [IsAuthenticated()]
     
     def get_permissions(self):
         if   self.action == 'create':
@@ -478,16 +558,16 @@ class StudyDimensionViewSet(viewsets.ModelViewSet):
         
 #         return results
 
-
 def calculate_percentiles_for_study(
-    study_id,
-    gender=None,         # 'M', 'F', or 'mixto'
-    age_min=None,
-    age_max=None,
-    dimensions_filter=None,
-    percentiles_list=None
-):
-    # Obtener el estudio o lanzar error
+    study_id: int,
+    gender: str = None,                  # 'M', 'F' o 'mixto'
+    age_ranges: list[tuple[int,int]] = None,
+    dimensions_filter: list[int] = None,
+    percentiles_list: list[float] = None
+) -> list:
+    """Calcula media, desviación y percentiles por dimensión,
+       por género y por cada rango de edad."""
+    # Obtener el estudio o lanzar 404
     try:
         study = Study.objects.get(id=study_id)
     except Study.DoesNotExist:
@@ -496,73 +576,99 @@ def calculate_percentiles_for_study(
     # Percentiles por defecto
     percentiles = percentiles_list or [5, 10, 25, 50, 75, 90, 95]
 
-    # Preparar dimensiones
-    dims = Dimension.objects.filter(dimension_study__id_study=study)
+    # Filtrar dimensiones
+    dims_qs = Dimension.objects.filter(dimension_study__id_study=study)
     if dimensions_filter:
-        dims = dims.filter(id__in=dimensions_filter)
+        dims_qs = dims_qs.filter(id__in=dimensions_filter)
+
+    # Determinar géneros a procesar
+    if gender == 'mixto':
+        genders_to_process = ['M', 'F']
+    elif gender in ('M', 'F'):
+        genders_to_process = [gender]
+    else:
+        genders_to_process = [None]  # todos juntos si no especifica
 
     results = []
-    genders_to_process = ['M', 'F'] if gender == 'mixto' else ([gender] if gender in ('M', 'F') else [None])
 
-    for dim in dims:
-        stats_block = {}
+    for dim in dims_qs:
+        entry = {
+            'dimension': dim.name,
+            'dimension_id': dim.id,
+            'by_gender': {}
+        }
+
         for g in genders_to_process:
-            values = _collect_measurements(study, dim, g, age_min, age_max)
-            if values:
-                stats_block[g or 'all'] = _compute_stats(values, percentiles)
+            # Preparamos buckets de edad
+            buckets = age_ranges or [(None, None)]
+            age_buckets_stats = {}
 
-        if stats_block:
-            entry = {
-                'dimension': dim.name,
-                'dimension_id': dim.id,
-            }
-            if gender == 'mixto':
-                entry['by_gender'] = {g: stats_block.get(g) for g in ['M', 'F'] if stats_block.get(g)}
-            else:
-                key = 'stats' if gender in ('M', 'F') else 'stats'
-                entry[key] = stats_block.get(gender) or stats_block.get('all')
+            for amin, amax in buckets:
+                vals = _collect_measurements(
+                    study=study,
+                    dimension=dim,
+                    gender_filter=g,
+                    age_min=amin,
+                    age_max=amax
+                )
+                if not vals:
+                    continue
+                stats = _compute_stats(vals, percentiles)
+                key = f"{amin}-{amax}" if amin is not None else "all"
+                age_buckets_stats[key] = stats
+
+            if age_buckets_stats:
+                age_key = g or 'all'
+                entry['by_gender'][age_key] = age_buckets_stats
+
+        if entry['by_gender']:
             results.append(entry)
 
     return results
 
-
 def _collect_measurements(study, dimension, gender_filter, age_min, age_max):
     """
-    Devuelve lista de valores filtrados según género (M/F/None) y rango de edad.
+    Devuelve lista de valores filtrados según:
+      - género (M/F/None),
+      - rango de edad [age_min, age_max] (si se pasan),
+      - pertenecen al estudio y dimensión dados.
     """
     qs = Measurement.objects.filter(
         study=study,
         dimension=dimension
     ).select_related('person')
+
     vals = []
     for m in qs:
         p = m.person
         # Filtrar por género
         if gender_filter and p.gender != gender_filter:
             continue
-        
-        # Filtrar por edad
-        if (age_min or age_max) and p.date_of_birth and m.date:
+
+        # Filtrar por rango de edad
+        if (age_min is not None or age_max is not None) and p.date_of_birth and m.date:
             md = m.date.date()
             bd = p.date_of_birth
             age = md.year - bd.year - ((md.month, md.day) < (bd.month, bd.day))
-            if age_min and age < age_min:
+            if age_min is not None and age < age_min:
                 continue
-            if age_max and age > age_max:
+            if age_max is not None and age > age_max:
                 continue
-        vals.append(m.value)
-    return vals
 
+        vals.append(m.value)
+
+    return vals
 
 def _compute_stats(values, percentiles_list):
     """
-    Calcula media, desviación estándar y percentiles de una lista de valores.
+    Calcula media, desviación estándar y percentiles de la lista de valores.
     """
     arr = np.array(values, dtype=float)
     mean = float(arr.mean())
-    sd = float(arr.std())
+    sd = float(arr.std(ddof=0))
     perc_vals = np.percentile(arr, percentiles_list)
     perc_dict = {str(int(p)): float(v) for p, v in zip(percentiles_list, perc_vals)}
+
     return {
         'mean': mean,
         'sd': sd,
@@ -570,114 +676,71 @@ def _compute_stats(values, percentiles_list):
     }
 
 
-
 class Perceptil(View):
     """Vista para obtener percentiles de un estudio."""
-    def get(self, request,study_id):
+    def get(self, request, study_id):
         if not study_id:
-            return JsonResponse( {"status": "error", "message": "El parámetro 'study_id' es requerido."},    status=400)
-        
-        # Parámetros GET
-        gender=request.GET.get('gender')
-        age_min=request.GET.get('age_min')
-        age_max=request.GET.get('age_max')
-        dimensions = request.GET.get('dimensions')
-        percentiles_param = request.GET.get('percentiles')
-        
-        #Validar y convertir parametros
-        if gender and gender not in ('M','F','mixto'):
-            return JsonResponse({'status':'error','message':'Valor gender invalido'}, status=400)
-       
-        try:
-            age_min=int(age_min) if age_min else None
-            age_max=int(age_max) if age_max else None
-        except ValueError:
-            return JsonResponse({'status':'error','message':'Valor de age_min y age_max invalido'}, status=400)
-       
-       
-        dims_filter = [int(d) for d in dimensions.split(',')] if dimensions else None
+            return JsonResponse(
+                {"status": "error", "message": "El parámetro 'study_id' es requerido."},
+                status=400
+            )
 
+        # Parámetros GET
+        gender = request.GET.get('gender')           # 'M', 'F' o 'mixto'
+        age_ranges_param = request.GET.get('age_ranges')   # e.g. "10-12,12-14,14-16"
+        # print("aaa",age_ranges)
+        dimensions = request.GET.get('dimensions')   # e.g. "1,2,3"
+        percentiles_param = request.GET.get('percentiles') # e.g. "5,95"
+
+        # Validaciones básicas
+        if gender and gender not in ('M', 'F', 'mixto'):
+            return JsonResponse({'status':'error','message':'Valor gender inválido.'}, status=400)
+
+        # Parsear age_ranges
+        try:
+            age_ranges = [
+                tuple(map(int, r.split('-')))
+                for r in age_ranges_param.split(',')
+            ] if age_ranges_param else None
+        except Exception:
+            return JsonResponse(
+                {'status':'error','message':"'age_ranges' debe ser lista de rangos 'min-max'."},
+                status=400
+            )
+
+        # Parsear dimensions
+        try:
+            dims_filter = [int(d) for d in dimensions.split(',')] if dimensions else None
+        except ValueError:
+            return JsonResponse(
+                {'status':'error','message':"'dimensions' debe ser lista de IDs enteros."},
+                status=400
+            )
+
+        # Parsear percentiles
         try:
             perc_list = [float(p) for p in percentiles_param.split(',')] if percentiles_param else None
         except ValueError:
-            return JsonResponse({'status': 'error', 'message': "'percentiles' debe ser lista de números."}, status=400)
+            return JsonResponse(
+                {'status': 'error', 'message': "'percentiles' debe ser lista de números."},
+                status=400
+            )
 
+        # Llamada a la lógica de cálculo
         try:
             results = calculate_percentiles_for_study(
-                study_id,
+                study_id=study_id,
                 gender=gender,
-                age_min=age_min,
-                age_max=age_max,
+                age_ranges=age_ranges,
                 dimensions_filter=dims_filter,
                 percentiles_list=perc_list
             )
             return JsonResponse({'status': 'success', 'study_id': study_id, 'results': results})
-
         except Http404 as e:
             return JsonResponse({'status': 'error', 'message': str(e)}, status=404)
         except Exception as e:
             return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
-       
-        # Obtener el ID del estudio desde los parámetros de la solicitud GET
-        # study_id = request.GET.get('study_id')
-        if not study_id:
-            return JsonResponse(
-                {"status": "error", "message": "El parámetro 'study_id' es requerido."}, 
-                status=400)
-        
-        # Extracción de parámetros vía GET:
-        #   gender: "M" o "F"
-        gender = request.GET.get('gender', None)
-    
-        # if gender and gender not in ['M', 'F']:
-        #     return JsonResponse({"status": "error", "message": "Valor de género inválido. Use 'M' o 'F'."}, status=400)
-
-        #   age_min y age_max: se convierten a entero si están proporcionados
-        age_min = request.GET.get('age_min', None)
-        age_max = request.GET.get('age_max', None)
-        try:
-            age_min = int(age_min) if age_min else None
-            age_max = int(age_max) if age_max else None
-        except ValueError:
-            return JsonResponse({"status": "error", "message": "age_min y age_max deben ser números enteros."}, status=400)
-
-        #   dimensions: se espera una lista separada por comas (por ejemplo: "Altura,Peso")
-        dimensions_filter = request.GET.get('dimensions', None)
-        if dimensions_filter:
-            dimensions_filter = [d.strip() for d in dimensions_filter.split(',')]
-
-        #   percentiles: lista separada por comas (por ejemplo: "5,95"). Se convierten a float.
-        percentiles_param = request.GET.get('percentiles', None)
-        if percentiles_param:
-            try:
-                percentiles_list = [float(p.strip()) for p in percentiles_param.split(',')]
-            except ValueError:
-                return JsonResponse({"status": "error", "message": "El parámetro 'percentiles' debe contener números separados por comas."}, status=400)
-        else:
-            percentiles_list = None
-
-  
-        
-        try:
-            # Calcular los percentiles y obtener los resultados
-            results = calculate_percentiles_for_study(study_id, gender=gender,
-                age_min=age_min,
-                age_max=age_max,
-                dimensions_filter=dimensions_filter,
-                percentiles_list=percentiles_list
-                )
-            
-            # Devolver los resultados en formato JSON
-            return JsonResponse({
-                "status": "success",
-                "study_id": study_id,
-                "results": results
-            })
-        except Study.DoesNotExist:
-            return JsonResponse({"status": "error", "message": f"El estudio con ID {study_id} no existe."}, status=404)
-        except Exception as e:
-            return JsonResponse({"status": "error", "message": str(e)}, status=500)
 
 
 def export_excel_percentiles(request, study_id):

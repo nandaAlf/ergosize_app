@@ -117,11 +117,16 @@ class StudyDimensionSerializer(serializers.ModelSerializer):
 
 class StudySerializer(serializers.ModelSerializer):
     dimensions = StudyDimensionSerializer(many=True, source='study_dimension', required=False)
-    
+    current_size = serializers.SerializerMethodField()
+    # members
     class Meta:
         model = Study
-        fields = ['name','size', 'id', 'description', 'location', 'country', 'start_date', 'end_date', 'dimensions','age_min','age_max','classification','gender','supervisor']
-        read_only_fields = ['id', 'supervisor']
+        fields = ['name','size', 'id', 'description', 'location', 'country', 'start_date', 'end_date', 'dimensions','age_min','age_max','classification','gender','supervisor','current_size']
+        read_only_fields = ['id', 'supervisor','current_sizes']
+
+    def get_current_size(self, obj):
+        # Cuenta personas únicas con mediciones en este estudio
+        return Measurement.objects.filter(study=obj).values('person').distinct().count()
 
     def create(self, validated_data):
         # Extraer los datos de las dimensiones si están presentes

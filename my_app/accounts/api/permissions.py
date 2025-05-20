@@ -85,26 +85,17 @@ class IsAdminOrInvestigator(HasRole):
 
 class IsCreatorOrAdmin(BasePermission):
     """
-    Permite acceso solo a:
-     – El supervisor (creador) del objeto Study
-     – Usuarios con rol 'admin'
-    Tanto para lectura como para modificación o borrado.
+    Permite al supervisor del estudio o al administrador.
     """
     def has_permission(self, request, view):
-        # Solo usuarios autenticados entran aquí; detalles se comprueban en has_object_permission
         return request.user.is_authenticated
 
     def has_object_permission(self, request, view, obj):
-        is_admin   = request.user.role == 'admin'
-        is_creator = obj.supervisor == request.user
-
-        # Lectura (GET, HEAD, OPTIONS): admin o creador
-        if request.method in SAFE_METHODS:
-            return is_admin or is_creator
-
-        # Escritura/Eliminación: mismo criterio
-        return is_admin or is_creator
-    
+        # En este caso obj será un Study
+        return (
+            request.user.role == 'admin' or
+            obj.supervisor == request.user
+        ) 
 class IsAdmin(BasePermission):
     """
       Solo usuarios con rol 'admin'.
