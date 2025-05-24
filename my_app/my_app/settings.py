@@ -147,6 +147,7 @@ CORS_ALLOWED_ORIGINS = [
 
 AUTH_USER_MODEL = 'accounts.User'
 
+# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 # REST_FRAMEWORK = {
 #     'DEFAULT_AUTHENTICATION_CLASSES': (
 #         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -156,9 +157,18 @@ AUTH_USER_MODEL = 'accounts.User'
 #     ),
 # }
 
-
-# SIMPLE_JWT = {
+______# SIMPLE_JWT = {
 #     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
 #     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
 #     'AUTH_HEADER_TYPES': ('Bearer',),
-# }
+# }fd
+EMAIL_BACKEND   = 'django.core.mail.backends.smtp.EmailBackend'
+DEFAULT_FROM_EMAIL = 'no-reply@tusitio.com'
+FRONTEND_URL = "http://localhost:5173/"
+
+EMAIL_HOST         = 'sandbox.smtp.mailtrap.io'
+EMAIL_HOST_USER    = config('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD= config('EMAIL_HOST_PASSWORD')
+EMAIL_PORT         = 2525         # o el puerto que te proporcione Mailtrap
+EMAIL_USE_TLS      = True         # TLS recomendado
+

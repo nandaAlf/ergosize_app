@@ -742,7 +742,6 @@ class Perceptil(View):
             return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
 
-
 def export_excel_percentiles(request, study_id):
     try:
         study = Study.objects.get(id=study_id)
@@ -760,11 +759,13 @@ def export_excel_percentiles(request, study_id):
         else:
             percentiles_list = [5, 10, 25, 50, 75, 90, 95]
 
+        # Construir age_ranges correctamente
+        age_ranges = [(age_min, age_max)] if age_min or age_max else None
+
         results = calculate_percentiles_for_study(
             study_id,
             gender=gender,
-            age_min=age_min,
-            age_max=age_max,
+            age_ranges=age_ranges,
             dimensions_filter=dimensions_filter,
             percentiles_list=percentiles_list
         )
@@ -784,76 +785,204 @@ def export_excel_percentiles(request, study_id):
             top=Side(style='thin'), bottom=Side(style='thin')
         )
 
-        total_columnas = 3 + len(percentiles_list)
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_columnas)
+        # --- Encabezado principal
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=5 + len(percentiles_list))
         title_cell = ws.cell(row=1, column=1)
         title_cell.value = f"Tabla antropométrica: {name_study}"
         title_cell.font = title_font
         title_cell.alignment = center_align
-        title_cell.fill = fill_gray  # Azul claro
+        title_cell.fill = fill_gray
 
+        # --- Metadatos del estudio
+        metadata = [
+            ("Fecha inicio:", study.start_date.strftime('%Y-%m-%d') if study.start_date else "N/A"),
+            ("Fecha fin:", study.end_date.strftime('%Y-%m-%d') if study.end_date else "N/A"),
+            ("Tamaño muestra:", study.size),
+            ("Género:", {"M": "Masculino", "F": "Femenino", "mixto": "Mixto"}.get(gender, "Todos")),
+            ("Rango edad:", f"{age_min or 'N/A'} - {age_max or 'N/A'}")
+        ]
 
-        ws.append(["Fecha inicio:", study.start_date, "Fecha fin:",study.end_date])
-        ws.append(["Muestra:", study.size,"Genero:", gender if gender else "Mixto"])
-        ws.append(["Edad mínima:", age_min if age_min is not None else "—","Edad máxima:", age_max if age_max is not None else "—"])
-        ws.append(["Descripción:"])
-        # Escribir la descripción en la fila siguiente, fusionando columnas desde B en adelante
-        desc_row = ws.max_row 
-        ws.merge_cells(start_row=desc_row, start_column=2, end_row=desc_row, end_column=total_columnas)
-        desc_cell = ws.cell(row=desc_row, column=2)
-        desc_cell.value = study.description
-        desc_cell.alignment = Alignment(wrap_text=True, vertical="top")  # Ajuste de texto
-        ws.append([]) 
-
-        # Aplicar formato a metadatos
-        for row in ws.iter_rows(min_row=2, max_row=6):
-            for cell in row:
+        for i, (label, value) in enumerate(metadata, start=2):
+            ws.append([label, value])
+            for col in [1, 2]:
+                cell = ws.cell(row=i, column=col)
+                cell.font = Font(bold=(col == 1))
                 cell.alignment = left_align
-                cell.font = Font(bold=isinstance(cell.value, str) and cell.value.endswith(':'))
 
-        # --- Encabezados
-        headers = ["Dimensión", "Media", "SD"] + [f"P{p}" for p in percentiles_list]
+        # --- Encabezados de datos
+        headers = ["Dimensión", "Género", "Rango Edad", "Media", "SD"] + [f"P{p}" for p in percentiles_list]
+        ws.append([])
         ws.append(headers)
-        for i, header in enumerate(headers, start=1):
-            cell = ws.cell(row=ws.max_row, column=i)
+        
+        # Aplicar estilos a encabezados
+        for col in range(1, len(headers) + 1):
+            cell = ws.cell(row=ws.max_row, column=col)
             cell.font = header_font
             cell.alignment = center_align
             cell.fill = fill_gray
             cell.border = border_thin
 
-        # --- Datos
+        # --- Datos principales
         for res in results:
-            row = [
-                res["dimension"],
-                res["mean"],
-                res["sd"],
-            ] + [res["percentiles"].get(str(p), '') for p in percentiles_list]
-            ws.append(row)
-            for i, val in enumerate(row, start=1):
-                cell = ws.cell(row=ws.max_row, column=i)
-                cell.alignment = center_align
-                cell.border = border_thin
+            dim_name = res['dimension']
+            for gender_key, age_data in res.get('by_gender', {}).items():
+                for age_range, stats in age_data.items():
+                    # Formatear valores
+                    gender_display = {
+                        'M': 'Masculino',
+                        'F': 'Femenino',
+                        'all': 'Mixto'
+                    }.get(gender_key, gender_key)
+                    
+                    age_display = "Todos" if age_range == "all" else age_range
+                    
+                    row = [
+                        dim_name,
+                        gender_display,
+                        age_display,
+                        round(stats['mean'], 2) if stats['mean'] else "-",
+                        round(stats['sd'], 2) if stats['sd'] else "-"
+                    ] + [round(stats['percentiles'].get(str(p), 0), 2) for p in percentiles_list]
+                    
+                    ws.append(row)
+                    
+                    # Formatear números
+                    for col in range(4, len(row) + 1):
+                        cell = ws.cell(row=ws.max_row, column=col)
+                        cell.number_format = '0.00'
 
-        # --- Ajustar ancho de columnas automáticamente
-        for column_cells in ws.columns:
-            for cell in column_cells:
-                if not isinstance(cell, MergedCell):
-                    col_letter = get_column_letter(cell.column)
-                    break
-            else:
-                continue
-            max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in column_cells)
-            ws.column_dimensions[col_letter].width = max_length + 2
+        # --- Ajustar anchos de columnas
+        column_widths = [35, 15, 15, 10, 10] + [10] * len(percentiles_list)
+        for i, width in enumerate(column_widths, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = width
 
-        # --- Respuesta
+        # --- Preparar respuesta
         response = HttpResponse(
-            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={'Content-Disposition': f'attachment; filename="tabla_antropometrica_{study_id}.xlsx"'},
         )
-        response["Content-Disposition"] = f'attachment; filename="percentiles_study_{study_id}.xlsx"'
         wb.save(response)
         return response
+
     except Study.DoesNotExist:
-          return HttpResponse("Estudio no encontrado.", status=404)
+        return HttpResponse("Estudio no encontrado.", status=404)
+    except Exception as e:
+        return HttpResponse(f"Error al generar el reporte: {str(e)}", status=500)
+    
+    
+    
+    
+# def export_excel_percentiles(request, study_id):
+    # try:
+    #     study = Study.objects.get(id=study_id)
+    #     name_study = request.GET.get('name', f"Estudio {study_id}")
+    #     gender = request.GET.get('gender')
+    #     age_min = int(request.GET.get('age_min')) if request.GET.get('age_min') else None
+    #     age_max = int(request.GET.get('age_max')) if request.GET.get('age_max') else None
+    #     dimensions_filter = request.GET.get('dimensions')
+    #     if dimensions_filter:
+    #         dimensions_filter = [int(x) for x in dimensions_filter.split(',')]
+
+    #     percentiles = request.GET.get('percentiles')
+    #     if percentiles:
+    #         percentiles_list = [float(p) for p in percentiles.split(',')]
+    #     else:
+    #         percentiles_list = [5, 10, 25, 50, 75, 90, 95]
+
+    #     results = calculate_percentiles_for_study(
+    #         study_id,
+    #         gender=gender,
+    #         age_min=age_min,
+    #         age_max=age_max,
+    #         dimensions_filter=dimensions_filter,
+    #         percentiles_list=percentiles_list
+    #     )
+
+    #     wb = Workbook()
+    #     ws = wb.active
+    #     ws.title = "Percentiles"
+
+    #     # --- Estilos
+    #     header_font = Font(bold=True)
+    #     title_font = Font(size=14, bold=True)
+    #     center_align = Alignment(horizontal="center")
+    #     left_align = Alignment(horizontal="left")
+    #     fill_gray = PatternFill("solid", fgColor="DDDDDD")
+    #     border_thin = Border(
+    #         left=Side(style='thin'), right=Side(style='thin'),
+    #         top=Side(style='thin'), bottom=Side(style='thin')
+    #     )
+
+    #     total_columnas = 3 + len(percentiles_list)
+    #     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_columnas)
+    #     title_cell = ws.cell(row=1, column=1)
+    #     title_cell.value = f"Tabla antropométrica: {name_study}"
+    #     title_cell.font = title_font
+    #     title_cell.alignment = center_align
+    #     title_cell.fill = fill_gray  # Azul claro
+
+
+    #     ws.append(["Fecha inicio:", study.start_date, "Fecha fin:",study.end_date])
+    #     ws.append(["Muestra:", study.size,"Genero:", gender if gender else "Mixto"])
+    #     ws.append(["Edad mínima:", age_min if age_min is not None else "—","Edad máxima:", age_max if age_max is not None else "—"])
+    #     ws.append(["Descripción:"])
+    #     # Escribir la descripción en la fila siguiente, fusionando columnas desde B en adelante
+    #     desc_row = ws.max_row 
+    #     ws.merge_cells(start_row=desc_row, start_column=2, end_row=desc_row, end_column=total_columnas)
+    #     desc_cell = ws.cell(row=desc_row, column=2)
+    #     desc_cell.value = study.description
+    #     desc_cell.alignment = Alignment(wrap_text=True, vertical="top")  # Ajuste de texto
+    #     ws.append([]) 
+
+    #     # Aplicar formato a metadatos
+    #     for row in ws.iter_rows(min_row=2, max_row=6):
+    #         for cell in row:
+    #             cell.alignment = left_align
+    #             cell.font = Font(bold=isinstance(cell.value, str) and cell.value.endswith(':'))
+
+    #     # --- Encabezados
+    #     headers = ["Dimensión", "Media", "SD"] + [f"P{p}" for p in percentiles_list]
+    #     ws.append(headers)
+    #     for i, header in enumerate(headers, start=1):
+    #         cell = ws.cell(row=ws.max_row, column=i)
+    #         cell.font = header_font
+    #         cell.alignment = center_align
+    #         cell.fill = fill_gray
+    #         cell.border = border_thin
+
+    #     # --- Datos
+    #     for res in results:
+    #         row = [
+    #             res["dimension"],
+    #             res["mean"],
+    #             res["sd"],
+    #         ] + [res["percentiles"].get(str(p), '') for p in percentiles_list]
+    #         ws.append(row)
+    #         for i, val in enumerate(row, start=1):
+    #             cell = ws.cell(row=ws.max_row, column=i)
+    #             cell.alignment = center_align
+    #             cell.border = border_thin
+
+    #     # --- Ajustar ancho de columnas automáticamente
+    #     for column_cells in ws.columns:
+    #         for cell in column_cells:
+    #             if not isinstance(cell, MergedCell):
+    #                 col_letter = get_column_letter(cell.column)
+    #                 break
+    #         else:
+    #             continue
+    #         max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in column_cells)
+    #         ws.column_dimensions[col_letter].width = max_length + 2
+
+    #     # --- Respuesta
+    #     response = HttpResponse(
+    #         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    #     )
+    #     response["Content-Disposition"] = f'attachment; filename="percentiles_study_{study_id}.xlsx"'
+    #     wb.save(response)
+    #     return response
+    # except Study.DoesNotExist:
+    #       return HttpResponse("Estudio no encontrado.", status=404)
      
 @csrf_exempt
 def preview_excel_percentiles(request):
