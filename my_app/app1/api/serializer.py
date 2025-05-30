@@ -6,7 +6,7 @@ class DimensionSerializer(serializers.ModelSerializer):
     id_dimension = serializers.IntegerField(source='id')
     class Meta:
         model = Dimension
-        fields = ['id_dimension', 'name', 'initial']
+        fields = ['id_dimension', 'name', 'initial','category']
         extra_kwargs = {
             'name': {'validators': []}  # Desactiva los validadores de unicidad
         }
@@ -58,9 +58,10 @@ class PersonSerializer(serializers.ModelSerializer):
 class StudyDimensionSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source='id_dimension.name', read_only=True)
     initial = serializers.CharField(source='id_dimension.initial', read_only=True)
+    category = serializers.CharField(source='id_dimension.category', read_only=True)
     class Meta:
         model = StudyDimension
-        fields = ['id_dimension','name','initial']
+        fields = ['id_dimension','name','initial','category']
         extra_kwargs = {
             'id_dimension': {'write_only': False}  # El id_dimension es necesario para escritura
         }
@@ -116,18 +117,67 @@ class StudyDimensionSerializer(serializers.ModelSerializer):
 #         fields = '__all__'
 
 class StudySerializer(serializers.ModelSerializer):
-    dimensions = StudyDimensionSerializer(many=True, source='study_dimension', required=False)
+    # dimensions = StudyDimensionSerializer(many=True, source='study_dimension', required=False)
     current_size = serializers.SerializerMethodField()
+    
+      # Nuevo campo agrupado
+    dimensions = serializers.SerializerMethodField(read_only=True)
+    # current_size = serializers.SerializerMethodField()
+      # → Solo escritura: mapea al related_name 'study_dimension'
+    study_dimension = StudyDimensionSerializer(
+        many=True, 
+        # source='study_dimension',  # coincide con related_name en tu modelo
+        write_only=True
+    )
+    
     # members
     class Meta:
         model = Study
-        fields = ['name','size', 'id', 'description', 'location', 'country', 'start_date', 'end_date', 'dimensions','age_min','age_max','classification','gender','supervisor','current_size']
+        fields = ['name','size', 'id', 'description', 'location', 'country', 'start_date', 'end_date','age_min','age_max','classification','gender','supervisor','current_size', 'dimensions','study_dimension']
         read_only_fields = ['id', 'supervisor','current_sizes']
 
     def get_current_size(self, obj):
         # Cuenta personas únicas con mediciones en este estudio
         return Measurement.objects.filter(study=obj).values('person').distinct().count()
 
+    def get_dimensions(self, obj):
+        """
+        Devuelve un dict { 'Altura': [...], 'Longitud': [...], ... }
+        con las dimensiones de este Study.
+        """
+        # # Primero, recuperamos todas las StudyDimension de este Study
+        # # study_dims = StudyDimension.objects.filter(id_study=obj).select_related('id_dimension')
+        # # Mapa de código→etiqueta
+        # labels = dict(Dimension.CATEGORY_CHOICES)
+
+        # grouped = {}
+        # for sd in study_dims:
+        #     dim = sd.id_dimension
+        #     cat_label = labels.get(dim.category, dim.category)
+        #     # Serializar solo los datos que quieras exponer
+        #     item = {
+        #         'id_dimension': dim.id,
+        #         'name':         dim.name,
+        #         'initial':      dim.initial,
+        #         # opcionalmente podrías incluir aquí sd.id o más campos
+        #     }
+        #     grouped.setdefault(cat_label, []).append(item)
+
+        # return grouped
+        labels = dict(Dimension.CATEGORY_CHOICES)
+        grouped = {}
+        for sd in obj.study_dimension.select_related('id_dimension').all():
+            dim = sd.id_dimension
+            cat = labels.get(dim.category, dim.category)
+            item = {
+                'id_dimension': dim.id,
+                'name':         dim.name,
+                'initial':      dim.initial,
+            }
+            grouped.setdefault(cat, []).append(item)
+        return grouped
+
+    
     def create(self, validated_data):
         # Extraer los datos de las dimensiones si están presentes
         dimensions_data = validated_data.pop('study_dimension', [])

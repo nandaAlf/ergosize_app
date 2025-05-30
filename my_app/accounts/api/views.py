@@ -14,12 +14,15 @@ from django.utils.encoding import smart_bytes, smart_str
 from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
+from rest_framework.decorators import action
+
 class MyTokenObtainPairView(TokenObtainPairView):
     print("there not wono")
     serializer_class = MyTokenObtainPairSerializer
 
 
 class UserViewSet(viewsets.ModelViewSet):
+    authentication_classes = [JWTAuthentication]  
     queryset = User.objects.all()
     # Elegimos el serializer según la acción
     def get_serializer_class(self):
@@ -34,6 +37,15 @@ class UserViewSet(viewsets.ModelViewSet):
         if self.action in ['list', 'destroy']:
             return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()]
+    
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def me(self, request):
+        """
+        GET /api/users/me/
+        Devuelve los datos del usuario autenticado.
+        """
+        serializer = self.get_serializer(request.user)
+        return Response(serializer.data)
     
 class PasswordChangeView(GenericAPIView):
     authentication_classes = [JWTAuthentication]
@@ -66,7 +78,8 @@ class PasswordResetRequestView(GenericAPIView):
         uidb64 = urlsafe_base64_encode(smart_bytes(user.pk))
         token  = default_token_generator.make_token(user)
 
-        reset_link = f"{settings.FRONTEND_URL}/reset-password?uidb64={uidb64}&token={token}"
+        reset_link = f"{settings.FRONTEND_URL}reset-password?uidb64={uidb64}&token={token}"
+        print("reset_link",reset_link)
         # Envío de email
         send_mail(
             subject="Restablecer contraseña",

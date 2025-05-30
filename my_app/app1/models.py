@@ -28,10 +28,21 @@ class Person(models.Model):
 
 
 class Dimension(models.Model):
-    # id_dimension = models.AutoField(primary_key=True)  # Reemplaza el id automático
+    CATEGORY_CHOICES = [
+        ('0', 'Altura'),
+        ('1', 'Longitud'),
+        ('2', 'Profundidad'),
+        ('3', 'Anchura'),
+        ('4', 'Diametro'),
+        ('5', 'Circunferencia'),
+        ('6', 'Alcance'),
+        ('7', 'Peso'),
+    ]
+
     name = models.CharField(max_length=100, unique=True,)
     initial=models.CharField(max_length=6)
-    # unit = models.CharField(max_length=50)
+    category=models.CharField(max_length=10,choices=CATEGORY_CHOICES)
+
 
     def __str__(self):
         return f"{self.name}"
@@ -90,19 +101,14 @@ class StudyDimension(models.Model):
 class Measurement(models.Model):
     POSITION_CHOICES = [
         ('P', 'Parado'),
-        # ('Erecto', 'Erecto'),
         ('S', 'Sentado'),
-        # ('Acostado', 'Acostado'),
     ]
     
     study = models.ForeignKey(Study, on_delete=models.CASCADE)  # Relación con el estudio
     person = models.ForeignKey(Person, on_delete=models.CASCADE, related_name='measurements')
     dimension = models.ForeignKey(Dimension, on_delete=models.CASCADE)
-    # measure = models.FloatField()
     value = models.FloatField()
-    # position = models.BooleanField(choices=POSITION_CHOICES)
-    position = models.CharField(max_length=2, choices=POSITION_CHOICES)  # Ahora más flexible
-    # date = models.DateTimeField(auto_now_add=True)
+    position = models.CharField(max_length=2, choices=POSITION_CHOICES)
     date = models.DateTimeField(default=timezone.now)
     class Meta:
       unique_together = ('study','person', 'dimension')
