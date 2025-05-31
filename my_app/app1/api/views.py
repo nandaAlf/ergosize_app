@@ -28,7 +28,7 @@ from accounts.api.permissions import HasRole, IsAdmin, IsAdminOrInvestigator, Is
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from reportlab.lib.pagesizes import A4, landscape,letter
-
+from rest_framework import pagination
 
 class PersonViewSet(viewsets.ModelViewSet):
     authentication_classes = [JWTAuthentication]
@@ -261,17 +261,72 @@ class MeasurementViewSet(viewsets.ModelViewSet):
             status=status.HTTP_204_NO_CONTENT
         )
 class StudyViewSet(viewsets.ModelViewSet):
-    # queryset = Study.objects.all()
-    # serializer_class = StudySerializer
+
     authentication_classes = [JWTAuthentication]
     queryset = Study.objects.all()
     serializer_class = StudySerializer
     permission_classes = [IsAuthenticated]
+    pagination_class = pagination.PageNumberPagination
     
-
-
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+    # def get_queryset(self):   
+    #     # Ordenar por fecha de inicio descendente y optimizar consultas
+    #     qs = (
+    #         super().get_queryset()
+    #         .select_related('supervisor')  # Optimizar relaciones
+    #         .only(  # Seleccionar solo campos necesarios
+    #             'id', 'name', 'size', 'location', 'country', 
+    #             'start_date', 'end_date',
+    #             'supervisor__username'  # Solo username del supervisor
+    #         )
+    #         .order_by('-start_date')  # Orden descendente por fecha
+    #     )
+        
+    #     # Si se pasa ?mine=true, filtra por supervisor
+    #     if self.request.query_params.get('mine') == 'true':
+    #         return qs.filter(supervisor=self.request.user)
+            
+    #     return qs
     def get_queryset(self):   
         qs = super().get_queryset()
+        # Búsqueda
+        search = self.request.query_params.get('search')
+        if search:
+            qs = qs.filter(
+                Q(name__icontains=search) | 
+                Q(location__icontains=search) | 
+                Q(country__icontains=search)
+            )
+        
+        # Filtro por género
+        gender = self.request.query_params.get('gender')
+        if gender:
+            qs = qs.filter(gender=gender)
+        
+        # Rango de fechas
+        start_date_gte = self.request.query_params.get('start_date__gte')
+        if start_date_gte:
+            qs = qs.filter(start_date__gte=start_date_gte)
+            
+        start_date_lte = self.request.query_params.get('start_date__lte')
+        if start_date_lte:
+            qs = qs.filter(start_date__lte=start_date_lte)
+        # Obtener parámetro de ordenamiento (default: -start_date)
+        ordering = self.request.query_params.get('ordering', '-start_date')
+         # Validar campos permitidos para ordenamiento
+        valid_fields = {'start_date', 'end_date', 'name', 'size'}
+        if ordering.lstrip('-') in valid_fields:
+            qs = qs.order_by(ordering)
+        else:
+            # Orden por defecto si el campo no es válido
+            qs = qs.order_by('-start_date')
         # Si se pasa ?mine=true, filtra por supervisor
         if self.request.query_params.get('mine') == 'true':
             return qs.filter(supervisor=self.request.user)

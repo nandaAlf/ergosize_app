@@ -148,20 +148,22 @@ CORS_ALLOWED_ORIGINS = [
 AUTH_USER_MODEL = 'accounts.User'
 
 # EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-# REST_FRAMEWORK = {
-#     'DEFAULT_AUTHENTICATION_CLASSES': (
-#         'rest_framework_simplejwt.authentication.JWTAuthentication',
-#     ),
-#     'DEFAULT_PERMISSION_CLASSES': (
-#         'rest_framework.permissions.IsAuthenticated',
-#     ),
-# }
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 2,  # Tamaño de página por defecto
+}
 
 # SIMPLE_JWT = {
 #     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
 #     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
 #     'AUTH_HEADER_TYPES': ('Bearer',),
-# }fd
+# }
 EMAIL_BACKEND   = 'django.core.mail.backends.smtp.EmailBackend'
 DEFAULT_FROM_EMAIL = 'no-reply@tusitio.com'
 FRONTEND_URL = "http://localhost:5173/"

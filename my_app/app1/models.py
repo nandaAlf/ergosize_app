@@ -29,13 +29,13 @@ class Person(models.Model):
 
 class Dimension(models.Model):
     CATEGORY_CHOICES = [
-        ('0', 'Altura'),
-        ('1', 'Longitud'),
-        ('2', 'Profundidad'),
-        ('3', 'Anchura'),
-        ('4', 'Diametro'),
-        ('5', 'Circunferencia'),
-        ('6', 'Alcance'),
+        ('0', 'Alturas'),
+        ('1', 'Longitudes'),
+        ('2', 'Profundidades'),
+        ('3', 'Anchuras'),
+        ('4', 'Diametros'),
+        ('5', 'Circunferencias'),
+        ('6', 'Alcances'),
         ('7', 'Peso'),
     ]
 
@@ -72,8 +72,8 @@ class Study(models.Model):
     size = models.IntegerField()
     location = models.CharField(max_length=100,blank=True, null=True)
     country = models.CharField(max_length=100,blank=True, null=True)
-    start_date = models.DateField()
-    end_date = models.DateField(blank=True, null=True)
+    start_date = models.DateField(db_index=True)
+    end_date = models.DateField(blank=True, null=True,db_index=True)
     supervisor = models.ForeignKey(
         User,
         on_delete=models.DO_NOTHING,
