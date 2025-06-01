@@ -29,6 +29,9 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from reportlab.lib.pagesizes import A4, landscape,letter
 from rest_framework import pagination
+from django.db.models import Q
+
+from app1.api.pagination import CustomPageNumberPagination 
 
 class PersonViewSet(viewsets.ModelViewSet):
     authentication_classes = [JWTAuthentication]
@@ -186,7 +189,6 @@ class DimensionViewSet(viewsets.ModelViewSet):
 
         return Response(grouped)
     
-
 class MeasurementViewSet(viewsets.ModelViewSet):
     queryset = Measurement.objects.all()
     authentication_classes = [JWTAuthentication]
@@ -266,16 +268,17 @@ class StudyViewSet(viewsets.ModelViewSet):
     queryset = Study.objects.all()
     serializer_class = StudySerializer
     permission_classes = [IsAuthenticated]
-    pagination_class = pagination.PageNumberPagination
+    pagination_class = CustomPageNumberPagination
+    # pagination_class = pagination.PageNumberPagination
     
-    def list(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
+    # def list(self, request, *args, **kwargs):
+    #     queryset = self.filter_queryset(self.get_queryset())
+    #     page = self.paginate_queryset(queryset)
+    #     if page is not None:
+    #         serializer = self.get_serializer(page, many=True)
+    #         return self.get_paginated_response(serializer.data)
+    #     serializer = self.get_serializer(queryset, many=True)
+    #     return Response(serializer.data)
     # def get_queryset(self):   
     #     # Ordenar por fecha de inicio descendente y optimizar consultas
     #     qs = (
@@ -305,12 +308,15 @@ class StudyViewSet(viewsets.ModelViewSet):
                 Q(country__icontains=search)
             )
         
+        # Si se pasa ?mine=true, filtra por supervisor
+        if self.request.query_params.get('mine') == 'true':
+            return qs.filter(supervisor=self.request.user)
         # Filtro por género
         gender = self.request.query_params.get('gender')
         if gender:
             qs = qs.filter(gender=gender)
         
-        # Rango de fechas
+        # 3. Rango de fechas
         start_date_gte = self.request.query_params.get('start_date__gte')
         if start_date_gte:
             qs = qs.filter(start_date__gte=start_date_gte)
@@ -318,19 +324,27 @@ class StudyViewSet(viewsets.ModelViewSet):
         start_date_lte = self.request.query_params.get('start_date__lte')
         if start_date_lte:
             qs = qs.filter(start_date__lte=start_date_lte)
-        # Obtener parámetro de ordenamiento (default: -start_date)
+            
+        # 5. Ordenamiento (SIEMPRE al final)
         ordering = self.request.query_params.get('ordering', '-start_date')
          # Validar campos permitidos para ordenamiento
         valid_fields = {'start_date', 'end_date', 'name', 'size'}
         if ordering.lstrip('-') in valid_fields:
             qs = qs.order_by(ordering)
         else:
-            # Orden por defecto si el campo no es válido
             qs = qs.order_by('-start_date')
-        # Si se pasa ?mine=true, filtra por supervisor
-        if self.request.query_params.get('mine') == 'true':
-            return qs.filter(supervisor=self.request.user)
         return qs
+    
+        # Sobreescribe get_paginate_by para respetar el parámetro
+ 
+    # def get_paginate_by(self, queryset):
+    #     page_size = self.request.query_params.get('page_size')
+    #     if page_size and page_size.isdigit():
+    #         print("page",page_size)
+    #     else:
+    #         print("No page")
+    #         return int(page_size)
+    #     return super().get_paginate_by(queryset)
     
     def get_permissions(self):
         if   self.action == 'create':
