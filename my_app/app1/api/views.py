@@ -1136,17 +1136,21 @@ def generar_pdf_ficha(request):
     study_id = request.GET.get('study_id')
     person_id = request.GET.get('person_id')
     # 1) Recuperar objetos
-    study  = Study.objects.get(id=study_id)
-    person = Person.objects.get(id=person_id)
+    if not study_id or not person_id:
+        return HttpResponse(status=404, content="Estudio o persona no encontrados.")
 
-    # 2) Formatear datos básicos
-    # datos = {
-    #     "nombre": person.name,
-    #     "sexo":   dict(Person.GENDER_CHOICES).get(person.gender, person.gender),
-    #     "pais":   person.country,
-    #     "estado": person.state,
-    #     "fecha_nacimiento": if  person.date_of_birth:  person.date_of_birth.strftime("%Y/%m/%d") ,
-    # }
+    # study  = Study.objects.get(id=study_id)
+    # person = Person.objects.get(id=person_id)
+
+    try:
+        study = Study.objects.get(id=study_id)
+    except Study.DoesNotExist:
+        raise Http404("Study no encontrado")
+
+    try:
+        person = Person.objects.get(id=person_id)
+    except Person.DoesNotExist:
+        raise Http404("Person no encontrado")
 
     datos = {
         "nombre": person.name if person.name else "",  # o '' si prefieres string vacío
@@ -1372,6 +1376,18 @@ def _compute_stats(values, percentiles_list):
     Calcula media, desviación estándar y percentiles de la lista de valores.
     """
     arr = np.array(values, dtype=float)
+    
+    
+    if arr.size == 0:
+        # Comportamiento “por defecto” cuando no hay datos:
+        # devolvemos 0 para mean/sd y 0 para cada percentil
+        perc_dict = {str(int(p)): 0.0 for p in percentiles_list}
+        return {
+            'mean': 0.0,
+            'sd': 0.0,
+            'percentiles': perc_dict
+        }
+    # Si no está vacío, calculamos normalmente
     mean = float(arr.mean())
     sd = float(arr.std(ddof=0))
     perc_vals = np.percentile(arr, percentiles_list)

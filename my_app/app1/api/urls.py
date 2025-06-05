@@ -17,5 +17,5 @@ urlpatterns = [
     path('export/excel/<int:study_id>/', export_excel_percentiles, name='export_excel'),
     path('export/pdf/<int:study_id>/', export_pdf_percentiles, name='export_pdf'),
     # path('import/excel/', preview_excel_percentiles, name='import_excel'), 
-    path('report/', generar_pdf_ficha, name='b'),
+    path('report/', generar_pdf_ficha, name='report'),
 ]
