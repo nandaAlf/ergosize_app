@@ -67,7 +67,7 @@ class ReportBlackBoxTest(TestCase):
         # 6) URL del reporte
         self.url = reverse('report')
 
-    def test_report_sin_params_devuelve_500(self):
+    def test_sin_params(self):
         """
         Si no pasamos study_id ni person_id, lo más probable es que falle con 500
         (p.ej. intentando hacer Study.objects.get(id=None)). 
@@ -77,7 +77,7 @@ class ReportBlackBoxTest(TestCase):
         # Puede ser 404 o 500 según tu manejo, en todo caso no debe ser 200
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
-    def test_report_con_ids_invalidos_devuelve_404(self):
+    def test_ids_invalidos(self):
         """
         Si enviamos study_id o person_id que no existen, debe lanzar excepción
         (Study.DoesNotExist o Person.DoesNotExist), y por tanto devolver 404.
@@ -90,7 +90,7 @@ class ReportBlackBoxTest(TestCase):
         response_b = self.client.get(self.url, {'study_id': self.study.id, 'person_id': 9999})
         self.assertEqual(response_b.status_code, status.HTTP_404_NOT_FOUND)
 
-    def test_report_con_ids_validos_devuelve_pdf(self):
+    def test_ids_validos_devuelve_pdf(self):
         """
         Con study_id y person_id correctos, la vista debe devolver:
           - status 200

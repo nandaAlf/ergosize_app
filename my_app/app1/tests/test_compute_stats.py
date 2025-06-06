@@ -3,7 +3,6 @@
 # import numpy as np
 # from django.test import TestCase
 
-from app1.api.views import _compute_stats
 
 # # Importa la función _compute_stats desde donde la tengas:
 # # por ejemplo: from myapp.views import _compute_stats
@@ -76,8 +75,7 @@ from app1.api.views import _compute_stats
 
 import numpy as np
 import pytest
-
-# from myapp.views import _compute_stats
+from app1.api.views import _compute_stats
 
 def test_compute_stats_valores_distintos_pytest():
     valores = [1, 2, 3, 4]

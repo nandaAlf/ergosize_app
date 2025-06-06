@@ -33,7 +33,7 @@ class StudyCreateBlackBoxTest(APITestCase):
         self.assertEqual(login_resp.status_code, status.HTTP_200_OK)
         return login_resp.json()['access']
 
-    def test_create_study_con_datos_validos_devuelve_201(self):
+    def test_datos_validos(self):
         """
         Con credenciales válidas (JWT) y role='investigador',
         debe devolver 201 Created y JSON con los datos del estudio.
@@ -77,7 +77,7 @@ class StudyCreateBlackBoxTest(APITestCase):
         self.assertIn('dimensions', data)
         self.assertIsInstance(data['dimensions'], dict)
 
-    def test_create_study_sin_autenticacion_devuelve_401(self):
+    def test_sin_autenticacion(self):
         """
         Sin token JWT, devuelve 401 Unauthorized.
         """
@@ -94,7 +94,7 @@ class StudyCreateBlackBoxTest(APITestCase):
         response = self.client.post(self.studies_url, payload, format='json')
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_create_study_campos_obligatorios_faltantes_devuelve_400(self):
+    def test_campos_obligatorios_faltantes(self):
         token = self.obtain_token()
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
 
@@ -129,7 +129,7 @@ class StudyCreateBlackBoxTest(APITestCase):
         errores_b = resp_b.json()
         self.assertIn('classification', errores_b)
 
-    def test_create_study_campos_invalidos_devuelve_400(self):
+    def test_campos_invalidos(self):
         token = self.obtain_token()
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {token}')
 

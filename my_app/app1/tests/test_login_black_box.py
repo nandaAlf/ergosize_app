@@ -5,7 +5,7 @@ from rest_framework.test import APITestCase
 from rest_framework import status
 from django.contrib.auth import get_user_model
 
-class TokenObtainPairBlackBoxTest(APITestCase):
+class LoginBlackBoxTest(APITestCase):
     def setUp(self):
         # 1) Creamos un usuario en la base de datos de pruebas
         User = get_user_model()
