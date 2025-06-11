@@ -68,13 +68,19 @@ class PasswordResetRequestView(GenericAPIView):
     Recibe {email} y envía un link de reseteo por email.
     """
     serializer_class = PasswordResetRequestSerializer
-
+    permission_classes = [AllowAny]  # Permite acceso sin autenticación
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data['email']
-        user = User.objects.get(email=email)
-
+        
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+             # Devuelve éxito aunque el usuario no exista por razones de seguridad
+            return Response({"detail": "Si existe una cuenta con este email, se ha enviado un enlace de recuperación"}, 
+                           status=status.HTTP_200_OK)
+      
         uidb64 = urlsafe_base64_encode(smart_bytes(user.pk))
         token  = default_token_generator.make_token(user)
 
@@ -97,7 +103,7 @@ class PasswordResetConfirmView(GenericAPIView):
     y cambia la contraseña.
     """
     serializer_class = PasswordResetConfirmSerializer
-
+    permission_classes = [AllowAny]
     def post(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
