@@ -1,14 +1,24 @@
 from django.db import models
+from django.forms import ValidationError
 from django.utils import timezone
 
 from accounts.models import User
 # Create your models here.
 class Person(models.Model):
+  
     GENDER_CHOICES = [
         ('M', 'Masculino'),
         ('F', 'Femenino'),
     ]
-    
+    # id=models.CharField(max_length=11,blank=True,primary_key=True)
+    identification = models.CharField(
+        max_length=15,
+        # unique=True,  # <-- Esto garantiza que no se repita
+        verbose_name="Número de identificación",
+        help_text="Ej: cédula, DNI o pasaporte",
+        blank=True, null=True
+    )
+
     name = models.CharField(max_length=100)
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
     date_of_birth = models.DateField(blank=True, null=True)
@@ -19,12 +29,13 @@ class Person(models.Model):
     def __str__(self):
         return self.name
     
-    # def get_dimensions(self, obj):
-    #     study_id = self.context['study_id']
-    #     # Filtrar las mediciones para esta persona y este estudio
-    #     measurements = Measurement.objects.filter(person=obj, study_id=study_id).select_related('dimension')
-    #     # Crear un diccionario con las dimensiones y sus valores
-    #     return {measure.dimension.name: measure.value for measure in measurements}
+    # class Meta:
+    #     constraints = [
+    #         models.UniqueConstraint(
+    #             fields=['name', 'gender', 'date_of_birth', 'country', 'state', 'province'],
+    #             name='unique_person_data'
+    #         )
+    #     ]    
 
 
 class Dimension(models.Model):
@@ -86,7 +97,12 @@ class Study(models.Model):
 
     def __str__(self):
         return self.name
-    
+    def clean(self):
+        if self.age_min and self.age_max and self.age_min > self.age_max:
+            raise ValidationError("La edad mínima no puede ser mayor a la máxima")
+        if self.end_date and self.start_date > self.end_date:
+            raise ValidationError("La fecha de fin no puede ser anterior a la de inicio")
+            
 class StudyDimension(models.Model):
     id_study = models.ForeignKey(Study, on_delete=models.CASCADE, related_name='study_dimension',)
     id_dimension = models.ForeignKey(Dimension, on_delete=models.CASCADE, related_name='dimension_study')
@@ -117,40 +133,14 @@ class Measurement(models.Model):
         return f"{self.person.name} - {self.dimension.name}"
 
 
-# class Supervisor(models.Model):
-#     name = models.CharField(max_length=100)
-#     email = models.EmailField()
+class StudyPerson(models.Model):
+    study = models.ForeignKey(Study, on_delete=models.CASCADE, related_name="participants")
+    person = models.ForeignKey(Person, on_delete=models.CASCADE, related_name="study_entries")
 
-#     def __str__(self):
-#         return self.name
+    class Meta:
+        unique_together = ('study', 'person')
+        verbose_name = "Participación en estudio"
+        verbose_name_plural = "Participaciones en estudios"
 
-# class AnthropometricTable(models.Model):
-#     # study = models.OneToOneField(Study, on_delete=models.CASCADE, )
-#     study = models.ForeignKey(Study, on_delete=models.CASCADE)
-#     name = models.CharField(max_length=100, null=True)  # Nombre opcional para la tabla
-#     description = models.TextField(blank=True, null=True)  # Descripción opcional
-#     dimension = models.ManyToManyField(Dimension, through='AnthropometricStatistic')
-
-#     def __str__(self):
-#         return f"Tabla Antropométrica de {self.study.name}"
-
-
-# class AnthropometricStatistic(models.Model):
-#     table = models.ForeignKey(AnthropometricTable, on_delete=models.CASCADE)
-#     dimension = models.ForeignKey(Dimension, on_delete=models.CASCADE)
-#     mean = models.FloatField()
-#     sd = models.FloatField()
-#     percentile_5 = models.FloatField(blank=True, null=True)
-#     percentile_10 = models.FloatField(blank=True, null=True)
-#     percentile_25 = models.FloatField(blank=True, null=True)
-#     percentile_50 = models.FloatField(blank=True, null=True)
-#     percentile_75 = models.FloatField(blank=True, null=True)
-#     percentile_90 = models.FloatField(blank=True, null=True)
-#     percentile_95 = models.FloatField(blank=True, null=True)
-
-#     class Meta:
-#       unique_together = ('table', 'dimension')
-                       
-#     def __str__(self):
-#         return f"{self.dimension.name} - {self.table.study.name}"
-
+    def __str__(self):
+        return f"{self.person.name} en {self.study.name}"

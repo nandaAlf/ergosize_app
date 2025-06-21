@@ -1,8 +1,8 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.response import Response
-from app1.models import Person, Measurement, Study, Dimension, StudyDimension
-from app1.api.serializer import  PersonSerializer, MeasurementSerializer, StudyDimensionSerializer, StudySerializer, DimensionSerializer, StudyDetailWithPersonsSerializer
+from app1.models import Person, Measurement, Study, Dimension, StudyDimension, StudyPerson
+from app1.api.serializer import  PersonSerializer, MeasurementSerializer, StudyDimensionSerializer, StudyPersonSerializer, StudySerializer, DimensionSerializer, StudyDetailWithPersonsSerializer
 from django.http import Http404, HttpResponse, JsonResponse
 from django.views import View
 from django.db import connection
@@ -67,8 +67,20 @@ class PersonViewSet(viewsets.ModelViewSet):
         # usuarios generales no tienen acceso
         return Person.objects.none()
 
+    def create(self, request, *args, **kwargs):
+     
+        # return super().create(request, *args, **kwargs)
+        print("🔵 Vista create called")
+        serializer = self.get_serializer(data=request.data)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except Exception as e:
+            print("❌ Validation error:", e)
+            raise
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
     def perform_create(self, serializer):
-    
         user = self.request.user
         measurements = self.request.data.get('measurements', [])
         roles=['investigador','admin']
@@ -92,6 +104,8 @@ class PersonViewSet(viewsets.ModelViewSet):
             if unauthorized.exists():
                 raise PermissionDenied("No puedes crear personas con mediciones de estudios que no supervisas.")
 
+        # serializer.save()
+        print("🔵 perform_create fue llamado")
         serializer.save()
         
     @action(detail=True, methods=['get'], url_path='studies/(?P<study_id>[^/.]+)/measurements')
@@ -126,20 +140,11 @@ class PersonViewSet(viewsets.ModelViewSet):
                 'date':         m.date.isoformat(),
             })
 
-        # 4) Datos de la persona (sin incluir mediciones planas)
-        person_data = {
-            'id':            person.id,
-            'name':          person.name,
-            'gender':        person.gender,
-            'date_of_birth': person.date_of_birth.isoformat() if person.date_of_birth else None,
-            'country':       person.country,
-            'state':         person.state,
-            'province':      person.province,
-        }
 
         return Response({
             # 'person':       person_data,
             'id':            person.id,
+            'identification':person.identification,
             'name':          person.name,
             'gender':        person.gender,
             'date_of_birth': person.date_of_birth.isoformat() if person.date_of_birth else None,
@@ -150,20 +155,6 @@ class PersonViewSet(viewsets.ModelViewSet):
         }, status=status.HTTP_200_OK)
    
 
-    # def perform_update(self, serializer):
-    #     """
-    #     Igual que create: verifica que el investigador solo modifique
-    #     mediciones en sus propios estudios.
-    #     """
-    #     user = self.request.user
-    #     data = self.request.data.get('measurements', [])
-    #     if user.role == 'investigador':
-    #         study_ids = {m.get('study') for m in data}
-           
-    #         not_owned = Study.objects.filter(id__in=study_ids).exclude(supervisor=user)
-    #         if not_owned.exists():
-    #             raise PermissionDenied("No puedes modificar personas con mediciones de estudios que no supervisas.")
-    #     serializer.save() 
    
 class DimensionViewSet(viewsets.ModelViewSet):
     authentication_classes = [JWTAuthentication]
@@ -383,6 +374,18 @@ class StudyDimensionViewSet(viewsets.ModelViewSet):
     #     return [perm() for perm in permission_classes]
 
 
+class StudyPersonViewSet(viewsets.ModelViewSet):
+    queryset = StudyPerson.objects.all()
+    serializer_class = StudyPersonSerializer
+    
+    # def get_permissions(self):
+    #     if self.action in ['create', 'update', 'partial_update', 'destroy']:
+    #         # sólo admin e investigadores
+    #         permission_classes = [IsAdmin|IsInvestigator]
+    #     else:
+    #         # listar y retrieve permitidos a todos autenticados
+    #         permission_classes = [IsAdmin|IsInvestigator|IsGeneralUser]
+    #     return [perm() for perm in permission_classes]
 
 
 class Perceptil(View):

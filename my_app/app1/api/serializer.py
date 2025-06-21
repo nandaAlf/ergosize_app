@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from app1.models import Person, Measurement, Study, Dimension, StudyDimension
+from app1.models import Person, Measurement, Study, Dimension, StudyDimension, StudyPerson
 
 
 class DimensionSerializer(serializers.ModelSerializer):
@@ -19,20 +19,107 @@ class MeasurementSerializer(serializers.ModelSerializer):
         model = Measurement
         fields = ['dimension_id', 'study_id', 'value', 'position','date']
 
+
+class StudyPersonSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StudyPerson
+        fields = ['study','person']
+
 class PersonSerializer(serializers.ModelSerializer):
     measurements = MeasurementSerializer(many=True)
     
     class Meta:
         model = Person
-        fields = ['id', 'name', 'gender', 'date_of_birth', 'country', 'state', 'province', 'measurements']
-    def create(self, validated_data):
-        measurements_data = validated_data.pop('measurements')
-        person = Person.objects.create(**validated_data)
+        fields = ['id','identification', 'name', 'gender', 'date_of_birth', 'country', 'state', 'province', 'measurements']
+    
+    def validate(self, data):
+        # DRF hace esta validación automáticamente, así que la atrapamos y controlamos
+        existing = Person.objects.filter(
+            identification=data['identification']
+            # name=data['name'],
+            # gender=data['gender'],
+            # date_of_birth=data.get('date_of_birth'),
+            # country=data.get('country'),
+            # state=data.get('state'),
+            # province=data.get('province'),
+        ).first()
 
-        for measurement_data in measurements_data:
-            Measurement.objects.create(person=person, **measurement_data)
+        if existing:
+            self.instance = existing  # <- Esto es CLAVE para que DRF no lo vea como error
+        return data
+    def create(self, validated_data):
+        print("🔵 serializer create called")
+        measurements_data = validated_data.pop('measurements')
+
+        # person, created = Person.objects.get_or_create(
+        #     name=validated_data['name'],
+        #     gender=validated_data['gender'],
+        #     date_of_birth=validated_data.get('date_of_birth'),
+        #     country=validated_data.get('country'),
+        #     state=validated_data.get('state'),
+        #     province=validated_data.get('province'),
+        #     defaults=validated_data
+        # )
+        person = self.instance or Person.objects.create(**validated_data)
+        for m_data in measurements_data:
+            Measurement.objects.update_or_create(
+                person=person,
+                study=m_data['study'],
+                dimension=m_data['dimension'],
+                defaults={
+                    'value': m_data['value'],
+                    'position': m_data['position'],
+                }
+            )
+            StudyPerson.objects.get_or_create(
+                person=person,
+                study=m_data['study']
+            )
 
         return person
+          # Buscar si la persona ya existe (según los campos únicos definidos)
+        # measurements_data = validated_data.pop('measurements')
+        # person, created = Person.objects.get_or_create(
+        #     name=validated_data['name'],
+        #     gender=validated_data['gender'],
+        #     date_of_birth=validated_data.get('date_of_birth'),
+        #     country=validated_data.get('country'),
+        #     state=validated_data.get('state'),
+        #     province=validated_data.get('province'),
+        #     defaults=validated_data
+        # )
+        #  # Insertar las mediciones
+        # for m_data in measurements_data:
+        #     # Crear o actualizar medición
+        #     Measurement.objects.update_or_create(
+        #         person=person,
+        #         study=m_data['study'],
+        #         dimension=m_data['dimension'],
+        #         defaults={
+        #             'value': m_data['value'],
+        #             'position': m_data['position'],
+        #         }
+        #     )
+
+        #     # Vincular a StudyPerson (si no está ya vinculado)
+        #     StudyPerson.objects.get_or_create(
+        #         person=person,
+        #         study=m_data['study']
+        #     )
+        
+        # measurements_data = validated_data.pop('measurements')
+        # person = Person.objects.create(**validated_data)
+        #   # Para evitar duplicados
+   
+        # study_ids_inserted = set()
+        # for measurement_data in measurements_data:
+        #     study = measurement_data['study']
+        #     Measurement.objects.create(person=person, **measurement_data)
+        #     if study.id not in study_ids_inserted:
+        #         StudyPerson.objects.get_or_create(person=person, study=study)
+        #         study_ids_inserted.add(study.id)
+        # return person
+    
     def update(self, instance, validated_data):
         measurements_data = validated_data.pop('measurements')
         instance.name = validated_data.get('name', instance.name)

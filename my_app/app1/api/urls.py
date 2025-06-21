@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework import routers
-from .views import Perceptil, PersonViewSet, MeasurementViewSet, StudyDimensionViewSet, StudyViewSet, DimensionViewSet, export_excel_percentiles, export_pdf_percentiles, generar_pdf_ficha
+from .views import Perceptil, PersonViewSet, MeasurementViewSet, StudyDimensionViewSet, StudyPersonViewSet, StudyViewSet, DimensionViewSet, export_excel_percentiles, export_pdf_percentiles, generar_pdf_ficha
 
 router = routers.DefaultRouter()
 router.register(r'persons', PersonViewSet)
@@ -10,6 +10,8 @@ router.register(r'dimension', DimensionViewSet)
 # router.register(r'table', AnthropometricTableViewSet)
 # router.register(r'statistic', AnthropometricStatisticViewSet)
 router.register(r'studydim', StudyDimensionViewSet)
+router.register(r'studyperson', StudyPersonViewSet)
+
 urlpatterns = [
     path('', include(router.urls)),   
     # path('study-data/<int:study_id>/', StudyDataView.as_view(), name='study-data'),
