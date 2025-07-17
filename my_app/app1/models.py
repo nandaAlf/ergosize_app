@@ -91,9 +91,6 @@ class Study(models.Model):
         related_name='studies',
         help_text='Usuario que creó este estudio'
     )
-    # dimension = models.ManyToManyField(Dimension, through='StudyDimension')
-    # supervisor = models.ForeignKey(Supervisor, on_delete=models.CASCADE)
-    # anthropometric_table = models.OneToOneField(AnthropometricTable, on_delete=models.CASCADE, unique=True)
 
     def __str__(self):
         return self.name

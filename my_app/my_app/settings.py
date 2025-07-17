@@ -25,7 +25,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = []
 
@@ -141,8 +142,10 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173"
+    '*'
+    # "http://localhost:3000",
+    # "http://localhost:5173",
+    # "https://ergosize-frontend-glwwvkvcl-fernandas-projects-f996f896.vercel.app"
 ]
 
 AUTH_USER_MODEL = 'accounts.User'
