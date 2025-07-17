@@ -144,12 +144,14 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:5173",
-    "https://ergosize-frontend-glwwvkvcl-fernandas-projects-f996f896.vercel.app"
+    # "https://ergosize-frontend-glwwvkvcl-fernandas-projects-f996f896.vercel.app"
+    "https://ergosize-frontend.vercel.app"
 ]
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:5173",
-    "https://ergosize-frontend-glwwvkvcl-fernandas-projects-f996f896.vercel.app"
+    # "https://ergosize-frontend-glwwvkvcl-fernandas-projects-f996f896.vercel.app"
+    "https://ergosize-frontend.vercel.app"
 ]
 
 AUTH_USER_MODEL = 'accounts.User'
